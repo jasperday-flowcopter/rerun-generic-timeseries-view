@@ -90,11 +90,11 @@ type ViewType = re_types::blueprint::views::TimeSeriesView;
 
 impl ViewClass for TimeSeriesView {
     fn identifier() -> ViewClassIdentifier {
-        ViewType::identifier()
+        "GenericTimeSeries".into()
     }
 
     fn display_name(&self) -> &'static str {
-        "Time series"
+        "Time series (generic)"
     }
 
     fn icon(&self) -> &'static re_ui::Icon {
@@ -109,7 +109,7 @@ impl ViewClass for TimeSeriesView {
             ..
         } = egui::InputOptions::default(); // This is OK, since we don't allow the user to change these modifiers.
 
-        Help::new("Time series view")
+        Help::new("Time series view (generic)")
             .docs_link("https://rerun.io/docs/reference/types/views/time_series_view")
             .control("Pan", (icons::LEFT_MOUSE_CLICK, "+", "drag"))
             .control(
@@ -269,7 +269,7 @@ impl ViewClass for TimeSeriesView {
     ) -> Result<(), ViewSystemExecutionError> {
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
 
-        list_item::list_item_scope(ui, "time_series_selection_ui", |ui| {
+        list_item::list_item_scope(ui, "generic_time_series_selection_ui", |ui| {
             let ctx = self.view_context(viewer_ctx, view_id, state);
             view_property_ui::<PlotBackground>(&ctx, ui);
             view_property_ui::<PlotLegend>(&ctx, ui);
@@ -644,7 +644,7 @@ impl ViewClass for TimeSeriesView {
 
         ui.scope(|ui| {
             // use timeline_name as part of id, so that egui stores different pan/zoom for different timelines
-            let plot_id_src = ("plot", &timeline_name);
+            let plot_id_src = ("generic_plot", &timeline_name);
 
             ui.style_mut().visuals.extreme_bg_color = background_color.into();
 

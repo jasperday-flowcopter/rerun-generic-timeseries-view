@@ -26,7 +26,7 @@ pub use view_class::TimeSeriesView;
 /// ```
 #[inline]
 pub(crate) fn plot_id(view_id: re_viewer_context::ViewId) -> egui::Id {
-    egui::Id::new(("plot", view_id))
+    egui::Id::new(("generic_plot", view_id))
 }
 
 // ---
