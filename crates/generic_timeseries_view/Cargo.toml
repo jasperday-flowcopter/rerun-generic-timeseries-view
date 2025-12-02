@@ -1,0 +1,21 @@
+[package]
+name = "generic_timeseries_view"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+include.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+rerun.workspace = true
+re_viewport_blueprint.workspace = true
+smallvec.workspace = true
+itertools.workspace = true
+egui_plot.workspace = true
+rayon.workspace = true
+
+[lints]
+workspace = true
