@@ -1,8 +1,9 @@
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 
+use re_viewer_context::{external::re_entity_db::InstancePath, typed_fallback_for};
+use re_viewport_blueprint::ViewPropertyQueryError;
 use rerun::external::re_chunk_store::{self, LatestAtQuery, RangeQuery, RowId};
 use rerun::external::re_log_types::{EntityPath, TimeInt};
-use rerun::external::{egui, re_renderer, re_view};
 use rerun::external::re_types::{
     Archetype as _, archetypes,
     components::{AggregationPolicy, Color, StrokeWidth},
@@ -11,12 +12,12 @@ use rerun::external::re_view::{
     RangeResultsExt as _, latest_at_with_blueprint_resolved_data,
     range_with_blueprint_resolved_data,
 };
-use rerun::external::re_viewer_context::{self,
-    IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError, VisualizerQueryInfo,
-    VisualizerSystem,
+use rerun::external::re_viewer_context::{
+    self, IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError,
+    VisualizerQueryInfo, VisualizerSystem,
 };
-use re_viewer_context::{external::re_entity_db::InstancePath, typed_fallback_for};
-use re_viewport_blueprint::ViewPropertyQueryError;
+use rerun::external::{egui, re_renderer, re_view};
+use rerun::{ComponentIdentifier, Scalars};
 
 use crate::series_query::{
     allocate_plot_points, collect_colors, collect_radius_ui, collect_scalars, collect_series_name,
@@ -38,14 +39,7 @@ impl IdentifiedViewSystem for SeriesLinesSystem {
 
 impl VisualizerSystem for SeriesLinesSystem {
     fn visualizer_query_info(&self) -> VisualizerQueryInfo {
-        let mut query_info = VisualizerQueryInfo::from_archetype::<archetypes::Scalars>();
-        query_info
-            .queried
-            .extend(archetypes::SeriesLines::all_components().iter().cloned());
-
-        query_info.relevant_archetypes = std::iter::once(archetypes::SeriesLines::name()).collect();
-
-        query_info
+        VisualizerQueryInfo::empty()
     }
 
     fn execute(
@@ -128,10 +122,38 @@ impl SeriesLinesSystem {
             // re_tracing::profile_scope!("primary", &data_result.entity_path.to_string());
 
             let entity_path = &data_result.entity_path;
+            println!("Entity path: {}", entity_path.to_string());
             let query = re_chunk_store::RangeQuery::new(view_query.timeline, time_range)
                 // We must fetch data with extended bounds, otherwise the query clamping would
                 // cut-off the data early at the edge of the view.
                 .include_extended_bounds(true);
+
+            // Get all components associated with our entity
+            let entity_components = {
+                let storage_engine = ctx.recording().storage_engine_arc();
+                let store = storage_engine.store();
+                store
+                    .all_components_for_entity(entity_path)
+                    .map(|component| {
+                        component
+                            .into_iter()
+                            .filter(|&component_id| {
+                                store
+                                    .entity_component_descriptor(entity_path, component_id)
+                                    .is_some_and(|descriptor| {
+                                        descriptor.component_type.is_some_and(|c_type| {
+                                            // make sure that we have the correct type here
+                                            c_type
+                                                == Scalars::descriptor_scalars()
+                                                    .component_type
+                                                    .unwrap()
+                                        })
+                                    })
+                            })
+                            .collect::<Vec<ComponentIdentifier>>()
+                    })
+                    .unwrap_or(Vec::new())
+            };
 
             let results = range_with_blueprint_resolved_data(
                 ctx,
@@ -139,15 +161,24 @@ impl SeriesLinesSystem {
                 &query,
                 data_result,
                 archetypes::Scalars::all_component_identifiers()
-                    .chain(archetypes::SeriesLines::all_component_identifiers()),
+                    .chain(archetypes::SeriesLines::all_component_identifiers())
+                    .chain(entity_components.clone().into_iter()),
             );
 
             // If we have no scalars, we can't do anything.
-            let Some(all_scalar_chunks) =
-                results.get_required_chunks(archetypes::Scalars::descriptor_scalars().component)
-            else {
+            let all_scalar_chunks_vec = entity_components
+                .clone()
+                .into_iter()
+                .chain(std::iter::once(
+                    archetypes::Scalars::descriptor_scalars().component,
+                ))
+                .filter_map(|c_id| results.get_required_chunks(c_id.to_owned()))
+                .collect_vec();
+
+            if all_scalar_chunks_vec.len() == 0 {
+                println!("Didn't get any scalars");
                 return Ok(());
-            };
+            }
 
             // All the default values for a `PlotPoint`, accounting for both overrides and default values.
             // TODO(andreas): Fallback should produce several colors. Instead, we generate additional ones on the fly if necessary right now.
@@ -169,11 +200,34 @@ impl SeriesLinesSystem {
                 },
             };
 
-            let num_series = determine_num_series(&all_scalar_chunks);
-            let mut points_per_series =
-                allocate_plot_points(&query, &default_point, &all_scalar_chunks, num_series);
+            let num_series_vec = all_scalar_chunks_vec
+                .iter()
+                .map(|all_scalar_chunks| determine_num_series(&all_scalar_chunks))
+                .collect_vec();
 
-            collect_scalars(&all_scalar_chunks, &mut points_per_series);
+            let total_num_series = num_series_vec.iter().sum();
+
+            let mut points_per_series = match all_scalar_chunks_vec.first() {
+                Some(all_scalar_chunks) => allocate_plot_points(
+                    &query,
+                    &default_point,
+                    &all_scalar_chunks,
+                    total_num_series,
+                ),
+                None => return Ok(()),
+            };
+
+            let mut start_idx = 0;
+            for (all_scalar_chunks, n_series) in
+                all_scalar_chunks_vec.iter().zip(num_series_vec.iter())
+            {
+                let end_idx = start_idx + n_series;
+                collect_scalars(
+                    all_scalar_chunks,
+                    &mut points_per_series[start_idx..end_idx],
+                );
+                start_idx = end_idx;
+            }
 
             // The plot view visualizes scalar data within a specific time range, without any kind
             // of time-alignment / bootstrapping behavior:
@@ -198,7 +252,7 @@ impl SeriesLinesSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks,
+                &all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesLines::descriptor_colors(),
             );
@@ -206,7 +260,7 @@ impl SeriesLinesSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks,
+                &all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesLines::descriptor_widths(),
                 0.5,
@@ -234,8 +288,12 @@ impl SeriesLinesSystem {
 
             // NOTE: The chunks themselves are already sorted as best as possible (hint: overlap)
             // by the query engine.
-            let all_chunks_sorted_and_not_overlapped =
-                all_scalar_chunks.iter().tuple_windows().all(|(lhs, rhs)| {
+            let all_chunks_sorted_and_not_overlapped = all_scalar_chunks_vec
+                .first()
+                .unwrap() // we already made sure there was at least one component
+                .iter()
+                .tuple_windows()
+                .all(|(lhs, rhs)| {
                     let lhs_time_max = lhs
                         .chunk
                         .timelines()
@@ -285,16 +343,26 @@ impl SeriesLinesSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                num_series,
+                total_num_series,
                 archetypes::SeriesLines::descriptor_visible_series().component,
             );
-            let series_names = collect_series_name(
-                &query_ctx,
-                &bootstrapped_results,
-                &results,
-                num_series,
-                &archetypes::SeriesLines::descriptor_names(),
-            );
+            // let series_names = collect_series_name(
+            //     &query_ctx,
+            //     &bootstrapped_results,
+            //     &results,
+            //     total_num_series,
+            //     &archetypes::SeriesLines::descriptor_names(),
+            // );
+            let series_names = entity_components
+                .iter()
+                .zip(num_series_vec.iter())
+                .flat_map(|(c_id, n_series)| {
+                    if *n_series == 1usize {
+                        Either::Left(std::iter::once(c_id.as_str().to_string()))
+                    } else {
+                        Either::Right((1..*n_series).map(|n| format!("{}/{}", c_id.as_str(), n)))
+                    }
+                }).collect_vec();
 
             debug_assert_eq!(points_per_series.len(), series_names.len());
             for (instance, (points, label, visible)) in itertools::izip!(
@@ -304,7 +372,7 @@ impl SeriesLinesSystem {
             )
             .enumerate()
             {
-                let instance_path = if num_series == 1 {
+                let instance_path = if total_num_series == 1 {
                     InstancePath::entity_all(data_result.entity_path.clone())
                 } else {
                     InstancePath::instance(data_result.entity_path.clone(), instance as u64)

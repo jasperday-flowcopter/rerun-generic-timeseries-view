@@ -88,7 +88,7 @@ pub fn allocate_plot_points(
 /// Allocates scalars per series into pre-allocated plot points.
 pub fn collect_scalars(
     all_scalar_chunks: &ChunksWithComponent<'_>,
-    points_per_series: &mut PlotPointsPerSeries,
+    points_per_series: &mut [Vec<PlotPoint>],
 ) {
     // re_tracing::profile_function!();
 

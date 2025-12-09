@@ -23,7 +23,7 @@ use re_chunk_store::TimeType;
 use re_format::time::next_grid_tick_magnitude_nanos;
 use re_log_types::{AbsoluteTimeRange, EntityPath, TimeInt};
 use re_types::{
-    ComponentBatch as _, View as _, ViewClassIdentifier,
+    ComponentBatch as _, ViewClassIdentifier,
     archetypes::{SeriesLines, SeriesPoints},
     blueprint::{
         archetypes::{PlotBackground, PlotLegend, ScalarAxis, TimeAxis},
@@ -86,7 +86,7 @@ impl ViewState for TimeSeriesViewState {
 #[derive(Default)]
 pub struct TimeSeriesView;
 
-type ViewType = re_types::blueprint::views::TimeSeriesView;
+// type ViewType = re_types::blueprint::views::TimeSeriesView;
 
 impl ViewClass for TimeSeriesView {
     fn identifier() -> ViewClassIdentifier {

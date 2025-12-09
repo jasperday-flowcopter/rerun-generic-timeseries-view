@@ -34,13 +34,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This is used for analytics, if the `analytics` feature is on in `Cargo.toml`
     let app_env = re_viewer::AppEnvironment::Custom("Flowcopter Custom Rerun Viewer".to_owned());
 
-    println!(
-        "This example starts a custom Rerun Viewer that is ready to accept data… you have to give it some!"
-    );
-    println!(
-        "Try for example to run: `cargo run -p minimal_options -- --connect` in another terminal instance."
-    );
-
     re_viewer::run_native_app(
         main_thread_token,
         Box::new(move |cc| {
