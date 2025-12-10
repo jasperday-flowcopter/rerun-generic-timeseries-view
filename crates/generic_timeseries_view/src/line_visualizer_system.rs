@@ -122,7 +122,6 @@ impl SeriesLinesSystem {
             // re_tracing::profile_scope!("primary", &data_result.entity_path.to_string());
 
             let entity_path = &data_result.entity_path;
-            println!("Entity path: {}", entity_path.to_string());
             let query = re_chunk_store::RangeQuery::new(view_query.timeline, time_range)
                 // We must fetch data with extended bounds, otherwise the query clamping would
                 // cut-off the data early at the edge of the view.
