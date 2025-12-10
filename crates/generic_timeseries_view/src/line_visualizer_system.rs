@@ -352,16 +352,36 @@ impl SeriesLinesSystem {
             //     total_num_series,
             //     &archetypes::SeriesLines::descriptor_names(),
             // );
+            let mut entity_base = entity_path.to_string();
+            entity_base = entity_base.trim_start_matches("/APM/").to_string();
+
+            let split_component_id = |c_id: &mut String| match c_id.find(":") {
+                Some(idx) => c_id.split_off(idx),
+                None => c_id.to_string(),
+            };
+
             let series_names = entity_components
                 .iter()
                 .zip(num_series_vec.iter())
                 .flat_map(|(c_id, n_series)| {
                     if *n_series == 1usize {
-                        Either::Left(std::iter::once(c_id.as_str().to_string()))
+                        Either::Left(std::iter::once(format!(
+                            "{}{}",
+                            entity_base,
+                            split_component_id(&mut c_id.as_str().to_string())
+                        )))
                     } else {
-                        Either::Right((1..*n_series).map(|n| format!("{}/{}", c_id.as_str(), n)))
+                        Either::Right((1..*n_series).map(|n| {
+                            format!(
+                                "{}{}.{}",
+                                entity_base,
+                                split_component_id(&mut c_id.as_str().to_string()),
+                                n
+                            )
+                        }))
                     }
-                }).collect_vec();
+                })
+                .collect_vec();
 
             debug_assert_eq!(points_per_series.len(), series_names.len());
             for (instance, (points, label, visible)) in itertools::izip!(
