@@ -1,3 +1,6 @@
+use re_viewport_blueprint::ViewPropertyQueryError;
+use rerun::external::{re_renderer, re_viewer_context::{self, IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError, VisualizerQueryInfo, VisualizerSystem}};
+
 pub struct SeriesSpanSystem {
 
 }
@@ -34,6 +37,6 @@ impl SeriesSpanSystem {
         ctx: &ViewContext<'_>,
         query: &ViewQuery<'_>,
     ) -> Result<(), ViewPropertyQueryError> {
-        
+        todo!()
     }
 }

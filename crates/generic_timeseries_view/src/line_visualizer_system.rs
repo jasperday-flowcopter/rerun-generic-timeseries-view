@@ -171,11 +171,11 @@ impl SeriesLinesSystem {
                 .chain(std::iter::once(
                     archetypes::Scalars::descriptor_scalars().component,
                 ))
+                .unique()
                 .filter_map(|c_id| results.get_required_chunks(c_id.to_owned()))
                 .collect_vec();
 
             if all_scalar_chunks_vec.len() == 0 {
-                println!("Didn't get any scalars");
                 return Ok(());
             }
 
