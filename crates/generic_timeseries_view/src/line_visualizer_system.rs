@@ -151,7 +151,7 @@ impl SeriesLinesSystem {
                             })
                             .collect::<Vec<ComponentIdentifier>>()
                     })
-                    .unwrap_or(Vec::new())
+                    .unwrap_or_default()
             };
 
             let results = range_with_blueprint_resolved_data(
@@ -161,7 +161,7 @@ impl SeriesLinesSystem {
                 data_result,
                 archetypes::Scalars::all_component_identifiers()
                     .chain(archetypes::SeriesLines::all_component_identifiers())
-                    .chain(entity_components.clone().into_iter()),
+                    .chain(entity_components.clone()),
             );
 
             // If we have no scalars, we can't do anything.
@@ -175,7 +175,7 @@ impl SeriesLinesSystem {
                 .filter_map(|c_id| results.get_required_chunks(c_id.to_owned()))
                 .collect_vec();
 
-            if all_scalar_chunks_vec.len() == 0 {
+            if all_scalar_chunks_vec.is_empty() {
                 return Ok(());
             }
 
@@ -201,7 +201,7 @@ impl SeriesLinesSystem {
 
             let num_series_vec = all_scalar_chunks_vec
                 .iter()
-                .map(|all_scalar_chunks| determine_num_series(&all_scalar_chunks))
+                .map(|all_scalar_chunks| determine_num_series(all_scalar_chunks))
                 .collect_vec();
 
             let total_num_series = num_series_vec.iter().sum();
@@ -210,7 +210,7 @@ impl SeriesLinesSystem {
                 Some(all_scalar_chunks) => allocate_plot_points(
                     &query,
                     &default_point,
-                    &all_scalar_chunks,
+                    all_scalar_chunks,
                     total_num_series,
                 ),
                 None => return Ok(()),
@@ -251,7 +251,7 @@ impl SeriesLinesSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks_vec.first().unwrap(),
+                all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesLines::descriptor_colors(),
             );
@@ -259,7 +259,7 @@ impl SeriesLinesSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks_vec.first().unwrap(),
+                all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesLines::descriptor_widths(),
                 0.5,
