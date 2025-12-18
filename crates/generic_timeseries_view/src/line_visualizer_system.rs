@@ -20,7 +20,7 @@ use rerun::external::{egui, re_renderer, re_view};
 use rerun::{ComponentIdentifier, Scalars};
 
 use crate::series_query::{
-    allocate_plot_points, collect_colors, collect_radius_ui, collect_scalars, collect_series_name,
+    allocate_plot_points, collect_colors, collect_radius_ui, collect_scalars,
     collect_series_visibility, determine_num_series,
 };
 use crate::{PlotPoint, PlotPointAttrs, PlotSeries, PlotSeriesKind, util};

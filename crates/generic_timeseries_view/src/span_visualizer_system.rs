@@ -34,8 +34,8 @@ impl VisualizerSystem for SeriesSpanSystem {
 impl SeriesSpanSystem {
     fn load_text(
         &mut self,
-        ctx: &ViewContext<'_>,
-        query: &ViewQuery<'_>,
+        _ctx: &ViewContext<'_>,
+        _query: &ViewQuery<'_>,
     ) -> Result<(), ViewPropertyQueryError> {
         todo!()
     }
