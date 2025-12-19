@@ -1,8 +1,5 @@
-use rerun::external::{egui::{self,
-    NumExt as _, Vec2, Vec2b,
-    ahash::{HashMap, HashSet},
-}, nohash_hasher, re_chunk_store, re_format, re_log_types, re_types, re_ui, re_view, re_viewer_context};
 use egui_plot::{ColorConflictHandling, Legend, Line, Plot, PlotPoint, Points};
+use itertools::Itertools;
 use nohash_hasher::IntSet;
 use re_viewer_context::{
     BlueprintContext as _, IdentifiedViewSystem as _, IndicatedEntities, MaybeVisualizableEntities,
@@ -13,11 +10,21 @@ use re_viewer_context::{
     external::re_entity_db::InstancePath,
 };
 use re_viewport_blueprint::ViewProperty;
+use rerun::{
+    ComponentIdentifier, components::MarkerShape, external::{
+        egui::{
+            self, NumExt as _, Vec2, Vec2b,
+            ahash::{HashMap, HashSet},
+        },
+        nohash_hasher, re_chunk_store, re_format, re_log_types, re_types, re_ui, re_view,
+        re_viewer_context,
+    }
+};
 use smallvec::SmallVec;
 
 use crate::{
     PlotSeriesKind, line_visualizer_system::SeriesLinesSystem,
-    point_visualizer_system::SeriesPointsSystem,
+    point_visualizer_system::SeriesPointsSystem, span_visualizer_system::SeriesSpanSystem,
 };
 use re_chunk_store::TimeType;
 use re_format::time::next_grid_tick_magnitude_nanos;
@@ -235,6 +242,7 @@ impl ViewClass for TimeSeriesView {
         );
 
         system_registry.register_visualizer::<SeriesLinesSystem>()?;
+        system_registry.register_visualizer::<SeriesSpanSystem>()?;
         system_registry.register_visualizer::<SeriesPointsSystem>()?;
         Ok(())
     }
@@ -441,6 +449,7 @@ impl ViewClass for TimeSeriesView {
 
         let line_series = system_output.view_systems.get::<SeriesLinesSystem>()?;
         let point_series = system_output.view_systems.get::<SeriesPointsSystem>()?;
+        let span_series = system_output.view_systems.get::<SeriesSpanSystem>()?;
 
         let all_plot_series: Vec<_> = std::iter::empty()
             .chain(line_series.all_series.iter())
@@ -452,6 +461,12 @@ impl ViewClass for TimeSeriesView {
         let plot_item_id_to_instance_path: HashMap<egui::Id, InstancePath> = all_plot_series
             .iter()
             .map(|series| (series.id, series.instance_path.clone()))
+            .chain(
+                span_series
+                    .all_series
+                    .iter()
+                    .map(|series| (series.id, series.instance_path.clone())),
+            )
             .collect();
 
         let current_time = ctx.time_ctrl.time_i64();
@@ -464,6 +479,15 @@ impl ViewClass for TimeSeriesView {
         let min_time = all_plot_series
             .iter()
             .map(|line| line.min_time)
+            .chain(span_series.all_series.iter().map(|series| {
+                series
+                    .points
+                    .iter()
+                    .map(|(time, _)| time)
+                    .min()
+                    .unwrap_or(&0)
+                    .to_owned()
+            }))
             .min()
             .unwrap_or(0);
 
@@ -483,6 +507,15 @@ impl ViewClass for TimeSeriesView {
         let max_time = all_plot_series
             .iter()
             .map(|line| line.points.last().map(|(t, _)| *t).unwrap_or(line.min_time))
+            .chain(span_series.all_series.iter().map(|series| {
+                series
+                    .points
+                    .iter()
+                    .last()
+                    .map(|(time, _)| time)
+                    .unwrap_or(&i64::min_value())
+                    .to_owned()
+            }))
             .max()
             .unwrap_or(0);
 
@@ -694,7 +727,7 @@ impl ViewClass for TimeSeriesView {
             if *legend_visible.0 {
                 plot = plot.legend(
                     Legend::default()
-                        .position(legend_corner.into())
+                        .position(from_corner(legend_corner))
                         .color_conflict_handling(ColorConflictHandling::PickFirst),
                 );
             }
@@ -736,8 +769,20 @@ impl ViewClass for TimeSeriesView {
                     all_plot_series
                         .iter()
                         .map(|series| series.instance_path.entity_path.clone())
+                        .chain(
+                            span_series
+                                .all_series
+                                .iter()
+                                .map(|series| series.instance_path.entity_path.clone()),
+                        )
                         // `short_names_with_disambiguation` expects no duplicate entities
                         .collect::<nohash_hasher::IntSet<_>>(),
+                );
+
+                add_span_to_plot(
+                    plot_ui,
+                    span_series.all_series.iter().collect_vec().as_slice(),
+                    time_offset,
                 );
 
                 add_series_to_plot(
@@ -1064,12 +1109,36 @@ fn add_series_to_plot(
                 Points::new(&series.label, points)
                     .color(color)
                     .radius(series.radius_ui)
-                    .shape(scatter_attrs.marker.into())
+                    .shape(from_marker(scatter_attrs.marker))
                     .highlight(highlight)
                     .id(series.id),
             ),
             // Break up the chart. At some point we might want something fancier.
             PlotSeriesKind::Clear => {}
+        }
+    }
+}
+
+fn add_span_to_plot(
+    plot_ui: &mut egui_plot::PlotUi<'_>,
+    all_plot_series: &[&crate::PlotTextSeries],
+    time_offset: i64,
+) {
+    for series in all_plot_series {
+        if series.visible {
+            let n_points = series.points.len();
+            for (i, (time_raw, label)) in series.points.iter().enumerate() {
+                if i == n_points - 1 { break }
+
+                let time = (time_raw - time_offset) as f64;
+
+                let range = {
+                    let next_time = (series.points[i + 1].0 - time_offset) as f64;
+                    time..=next_time
+                };
+                let span = egui_plot::Span::new(label, range);
+                plot_ui.span(span);
+            }
         }
     }
 }
@@ -1165,7 +1234,32 @@ fn make_range_sane(y_range: Range1D) -> Range1D {
     }
 }
 
-#[test]
-fn test_help_view() {
-    // re_test_context::TestContext::test_help_view(|ctx| TimeSeriesView.help(ctx));
+// Required because we're using an incompatible version of
+// egui_plot and so the `.into()` is into an incompatible
+// type....
+
+#[inline]
+fn from_marker(shape: MarkerShape) -> egui_plot::MarkerShape {
+    match shape {
+        MarkerShape::Circle => egui_plot::MarkerShape::Circle,
+        MarkerShape::Diamond => egui_plot::MarkerShape::Diamond,
+        MarkerShape::Square => egui_plot::MarkerShape::Square,
+        MarkerShape::Cross => egui_plot::MarkerShape::Cross,
+        MarkerShape::Plus => egui_plot::MarkerShape::Plus,
+        MarkerShape::Up => egui_plot::MarkerShape::Up,
+        MarkerShape::Down => egui_plot::MarkerShape::Down,
+        MarkerShape::Left => egui_plot::MarkerShape::Left,
+        MarkerShape::Right => egui_plot::MarkerShape::Right,
+        MarkerShape::Asterisk => egui_plot::MarkerShape::Asterisk,
+    }
+}
+
+#[inline]
+fn from_corner(corner: Corner2D) -> egui_plot::Corner {
+    match corner {
+        Corner2D::LeftTop => egui_plot::Corner::LeftTop,
+        Corner2D::RightTop => egui_plot::Corner::RightTop,
+        Corner2D::LeftBottom => egui_plot::Corner::LeftBottom,
+        Corner2D::RightBottom => egui_plot::Corner::RightBottom,
+    }
 }

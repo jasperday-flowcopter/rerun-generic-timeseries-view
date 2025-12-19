@@ -1,14 +1,15 @@
+use re_viewport_blueprint::{ViewProperty, ViewPropertyQueryError};
 use rerun::external::re_log_types::{self, AbsoluteTimeRange};
 use rerun::external::re_types::{
     blueprint::{archetypes::TimeAxis, components::LinkAxis},
     components::AggregationPolicy,
     datatypes::{TimeRange, TimeRangeBoundary},
 };
-use rerun::external::{egui, re_chunk_store, re_log, re_types, re_viewer_context};
 use rerun::external::re_viewer_context::{
     ViewContext, ViewQuery, ViewerContext, external::re_entity_db::InstancePath,
 };
-use re_viewport_blueprint::{ViewProperty, ViewPropertyQueryError};
+use rerun::external::{egui, re_chunk_store, re_log, re_types, re_viewer_context};
+use rerun::{ComponentIdentifier, ComponentType, EntityPath};
 
 use crate::{
     PlotPoint, PlotSeries, PlotSeriesKind, ScatterAttrs,
@@ -61,7 +62,6 @@ pub fn determine_time_range(
 
     let data_time_range =
         AbsoluteTimeRange::from_relative_time_range(&visible_time_range, current_time);
-
 
     let time_axis = ViewProperty::from_archetype::<TimeAxis>(
         ctx.viewer_ctx.blueprint_db(),
@@ -304,4 +304,46 @@ fn add_series_runs(
     if !series.points.is_empty() {
         all_series.push(series);
     }
+}
+
+pub fn get_entity_components(
+    ctx: &ViewContext<'_>,
+    entity_path: &EntityPath,
+    identifier: ComponentType,
+) -> Vec<ComponentIdentifier> {
+    let storage_engine = ctx.recording().storage_engine_arc();
+    let store = storage_engine.store();
+    store
+        .all_components_for_entity(entity_path)
+        .map(|component| {
+            component
+                .into_iter()
+                .filter(|&component_id| {
+                    store
+                        .entity_component_descriptor(entity_path, component_id)
+                        .is_some_and(|descriptor| {
+                            descriptor.component_type.is_some_and(|c_type| {
+                                // make sure that we have the correct type here
+                                c_type == identifier
+                            })
+                        })
+                })
+                .collect::<Vec<ComponentIdentifier>>()
+        })
+        .unwrap_or_default()
+}
+
+pub fn get_label(entity_path: &EntityPath, component_id: &ComponentIdentifier) -> String {
+    let entity_base = entity_path.to_string();
+
+    let split_component_id = |c_id: &mut String| match c_id.find(":") {
+        Some(idx) => c_id.split_off(idx),
+        None => c_id.to_string(),
+    };
+
+    format!(
+        "{}{}",
+        entity_base,
+        split_component_id(&mut component_id.as_str().to_string())
+    )
 }

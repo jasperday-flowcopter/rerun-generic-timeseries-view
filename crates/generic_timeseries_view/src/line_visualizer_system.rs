@@ -17,12 +17,13 @@ use rerun::external::re_viewer_context::{
     VisualizerQueryInfo, VisualizerSystem,
 };
 use rerun::external::{egui, re_renderer, re_view};
-use rerun::{ComponentIdentifier, Scalars};
+use rerun::{Scalars};
 
 use crate::series_query::{
     allocate_plot_points, collect_colors, collect_radius_ui, collect_scalars,
     collect_series_visibility, determine_num_series,
 };
+use crate::util::{get_entity_components, get_label};
 use crate::{PlotPoint, PlotPointAttrs, PlotSeries, PlotSeriesKind, util};
 
 /// The system for rendering [`archetypes::SeriesLines`] archetypes.
@@ -128,31 +129,9 @@ impl SeriesLinesSystem {
                 .include_extended_bounds(true);
 
             // Get all components associated with our entity
-            let entity_components = {
-                let storage_engine = ctx.recording().storage_engine_arc();
-                let store = storage_engine.store();
-                store
-                    .all_components_for_entity(entity_path)
-                    .map(|component| {
-                        component
-                            .into_iter()
-                            .filter(|&component_id| {
-                                store
-                                    .entity_component_descriptor(entity_path, component_id)
-                                    .is_some_and(|descriptor| {
-                                        descriptor.component_type.is_some_and(|c_type| {
-                                            // make sure that we have the correct type here
-                                            c_type
-                                                == Scalars::descriptor_scalars()
+            let entity_components = get_entity_components(ctx, entity_path, Scalars::descriptor_scalars()
                                                     .component_type
-                                                    .unwrap()
-                                        })
-                                    })
-                            })
-                            .collect::<Vec<ComponentIdentifier>>()
-                    })
-                    .unwrap_or_default()
-            };
+                                                    .unwrap());
 
             let results = range_with_blueprint_resolved_data(
                 ctx,
@@ -166,10 +145,9 @@ impl SeriesLinesSystem {
 
             // If we have no scalars, we can't do anything.
             let all_scalar_chunks_vec = entity_components
-                .clone()
-                .into_iter()
+                .iter()
                 .chain(std::iter::once(
-                    archetypes::Scalars::descriptor_scalars().component,
+                    &archetypes::Scalars::descriptor_scalars().component,
                 ))
                 .unique()
                 .filter_map(|c_id| results.get_required_chunks(c_id.to_owned()))
@@ -352,30 +330,21 @@ impl SeriesLinesSystem {
             //     total_num_series,
             //     &archetypes::SeriesLines::descriptor_names(),
             // );
-            let mut entity_base = entity_path.to_string();
-            entity_base = entity_base.trim_start_matches("/APM/").to_string();
 
-            let split_component_id = |c_id: &mut String| match c_id.find(":") {
-                Some(idx) => c_id.split_off(idx),
-                None => c_id.to_string(),
-            };
 
             let series_names = entity_components
                 .iter()
                 .zip(num_series_vec.iter())
                 .flat_map(|(c_id, n_series)| {
                     if *n_series == 1usize {
-                        Either::Left(std::iter::once(format!(
-                            "{}{}",
-                            entity_base,
-                            split_component_id(&mut c_id.as_str().to_string())
-                        )))
+                        Either::Left(std::iter::once(
+                            get_label(entity_path, c_id)
+                        ))
                     } else {
                         Either::Right((1..*n_series).map(|n| {
                             format!(
-                                "{}{}.{}",
-                                entity_base,
-                                split_component_id(&mut c_id.as_str().to_string()),
+                                "{}.{}",
+                                get_label(entity_path, c_id),
                                 n
                             )
                         }))

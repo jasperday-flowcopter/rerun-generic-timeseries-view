@@ -109,3 +109,31 @@ pub struct PlotSeries {
     /// This is an average.
     pub aggregation_factor: f64,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextSeriesKind {
+    Spans,
+    Events,
+    Clear,
+}
+
+/// Series for plotting spans or events
+#[derive(Clone, Debug)]
+pub struct PlotTextSeries {
+    pub instance_path: InstancePath,
+
+    /// Id used for this series in the egui plot view
+    pub id: egui::Id,
+
+    /// Whether the individual series is visible.
+    ///
+    /// If this is false, [`PlotSeries::points`] is allowed to be empty.
+    pub visible: bool,
+
+    pub kind: TextSeriesKind,
+
+    /// Label of the series.
+    pub label: String,
+
+    pub points: Vec<(i64, String)>,
+}
