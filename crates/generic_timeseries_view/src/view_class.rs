@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use egui_plot::{ColorConflictHandling, Legend, Line, Plot, PlotPoint, Points};
 use itertools::Itertools;
 use nohash_hasher::IntSet;
@@ -11,20 +13,23 @@ use re_viewer_context::{
 };
 use re_viewport_blueprint::ViewProperty;
 use rerun::{
-    ComponentIdentifier, components::MarkerShape, external::{
+    ComponentIdentifier,
+    components::MarkerShape,
+    external::{
         egui::{
             self, NumExt as _, Vec2, Vec2b,
             ahash::{HashMap, HashSet},
         },
         nohash_hasher, re_chunk_store, re_format, re_log_types, re_types, re_ui, re_view,
         re_viewer_context,
-    }
+    },
 };
 use smallvec::SmallVec;
 
 use crate::{
     PlotSeriesKind, line_visualizer_system::SeriesLinesSystem,
     point_visualizer_system::SeriesPointsSystem, span_visualizer_system::SeriesSpanSystem,
+    ui::selection_ui_column_visibility, util::get_entity_components,
 };
 use re_chunk_store::TimeType;
 use re_format::time::next_grid_tick_magnitude_nanos;
@@ -45,7 +50,27 @@ use re_view::{
     view_property_ui,
 };
 
-// ---
+/// User-changeable per-component settings
+#[derive(Clone, Debug)]
+pub(crate) struct ComponentSettings {
+    pub entity_path: EntityPath,
+    pub identifier: ComponentIdentifier,
+    pub enabled: bool,
+    pub offset: f64,
+    pub scale: f64,
+}
+
+impl ComponentSettings {
+    fn new(entity_path: EntityPath, identifier: ComponentIdentifier) -> Self {
+        Self {
+            entity_path,
+            identifier,
+            enabled: true,
+            offset: 0.0,
+            scale: 1.0,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct TimeSeriesViewState {
@@ -67,6 +92,8 @@ pub struct TimeSeriesViewState {
     /// (e.g. to avoid `hello/x` and `world/x` both being named `x`), and this knowledge must be
     /// forwarded to the default providers.
     pub(crate) default_names_for_entities: HashMap<EntityPath, String>,
+
+    pub(crate) component_settings: Vec<ComponentSettings>,
 }
 
 impl Default for TimeSeriesViewState {
@@ -76,6 +103,7 @@ impl Default for TimeSeriesViewState {
             max_time_view_range: AbsoluteTimeRange::EMPTY,
             time_offset: 0,
             default_names_for_entities: Default::default(),
+            component_settings: Default::default(),
         }
     }
 }
@@ -277,8 +305,17 @@ impl ViewClass for TimeSeriesView {
     ) -> Result<(), ViewSystemExecutionError> {
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
 
+        ui.label("Test");
+
         list_item::list_item_scope(ui, "generic_time_series_selection_ui", |ui| {
+            
+            // Mutably borrow state here
+            state.component_settings =
+            selection_ui_column_visibility(&viewer_ctx, ui, &state.component_settings);
+
+            // Immutably borrow here for the rest of scope
             let ctx = self.view_context(viewer_ctx, view_id, state);
+
             view_property_ui::<PlotBackground>(&ctx, ui);
             view_property_ui::<PlotLegend>(&ctx, ui);
 
@@ -444,17 +481,60 @@ impl ViewClass for TimeSeriesView {
         system_output: SystemExecutionOutput,
     ) -> Result<(), ViewSystemExecutionError> {
         // re_tracing::profile_function!();
-
+        
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
+        
+        let entities = query
+            .iter_all_entities()
+            .map(|entity| entity.clone())
+            .collect::<Vec<_>>();
+
+        let component_settings = {
+            let view_ctx = self.view_context(ctx, query.view_id, state);
+            entities
+                .iter()
+                .sorted()
+                .flat_map(|e| {
+                    get_entity_components(&view_ctx, e, SeriesLinesSystem::component_type())
+                        .into_iter()
+                        .sorted()
+                        .map(|c_id| ComponentSettings::new(e.clone(), c_id))
+                })
+                .chain(entities.iter().flat_map(|e| {
+                    get_entity_components(&view_ctx, e, SeriesSpanSystem::component_type())
+                        .into_iter()
+                        .sorted()
+                        .map(|c_id| ComponentSettings::new(e.clone(), c_id))
+                }))
+                .collect::<Vec<_>>()
+        };
+
+        merge_sorted_component_settings(&mut state.component_settings, &component_settings);
 
         let line_series = system_output.view_systems.get::<SeriesLinesSystem>()?;
         let point_series = system_output.view_systems.get::<SeriesPointsSystem>()?;
         let span_series = system_output.view_systems.get::<SeriesSpanSystem>()?;
-
         let all_plot_series: Vec<_> = std::iter::empty()
             .chain(line_series.all_series.iter())
             .chain(point_series.all_series.iter())
+            .filter(
+                |series| {
+                    let idx = state.component_settings.binary_search_by(|settings| 
+                        // binary search should indicate whether the argument is Less / Equal / Greater than target
+                        // sorted_component_cmp indicates whether the series is Less / Equal / Greater than the argument, hence .reverse()
+                        sorted_component_cmp(settings, &series.instance_path.entity_path, &series.component_identifier).reverse()
+                    ).unwrap();
+                    state.component_settings[idx].enabled
+                }
+            )
             .collect();
+
+        let all_span_series: Vec<_> = span_series.all_series.iter().filter(|series| {
+            let idx = state.component_settings.binary_search_by(|settings| {
+                sorted_component_cmp(settings, &series.instance_path.entity_path, &series.component_identifier).reverse()
+            }).unwrap();
+            state.component_settings[idx].enabled
+        }).collect();
 
         // Note that a several plot items can point to the same entity path and in some cases even to the same instance path!
         // (e.g. when plotting both lines & points with the same entity/instance path)
@@ -462,8 +542,7 @@ impl ViewClass for TimeSeriesView {
             .iter()
             .map(|series| (series.id, series.instance_path.clone()))
             .chain(
-                span_series
-                    .all_series
+                all_span_series
                     .iter()
                     .map(|series| (series.id, series.instance_path.clone())),
             )
@@ -479,7 +558,7 @@ impl ViewClass for TimeSeriesView {
         let min_time = all_plot_series
             .iter()
             .map(|line| line.min_time)
-            .chain(span_series.all_series.iter().map(|series| {
+            .chain(all_span_series.iter().map(|series| {
                 series
                     .points
                     .iter()
@@ -507,7 +586,7 @@ impl ViewClass for TimeSeriesView {
         let max_time = all_plot_series
             .iter()
             .map(|line| line.points.last().map(|(t, _)| *t).unwrap_or(line.min_time))
-            .chain(span_series.all_series.iter().map(|series| {
+            .chain(all_span_series.iter().map(|series| {
                 series
                     .points
                     .iter()
@@ -770,8 +849,7 @@ impl ViewClass for TimeSeriesView {
                         .iter()
                         .map(|series| series.instance_path.entity_path.clone())
                         .chain(
-                            span_series
-                                .all_series
+                            all_span_series
                                 .iter()
                                 .map(|series| series.instance_path.entity_path.clone()),
                         )
@@ -781,7 +859,7 @@ impl ViewClass for TimeSeriesView {
 
                 add_span_to_plot(
                     plot_ui,
-                    span_series.all_series.iter().collect_vec().as_slice(),
+                    all_span_series.into_iter().collect_vec().as_slice(),
                     time_offset,
                 );
 
@@ -1128,7 +1206,9 @@ fn add_span_to_plot(
         if series.visible {
             let n_points = series.points.len();
             for (i, (time_raw, label)) in series.points.iter().enumerate() {
-                if i == n_points - 1 { break }
+                if i == n_points - 1 {
+                    break;
+                }
 
                 let time = (time_raw - time_offset) as f64;
 
@@ -1232,6 +1312,62 @@ fn make_range_sane(y_range: Range1D) -> Range1D {
     } else {
         Range1D::new(start, end)
     }
+}
+
+/// Merge two sorted lists of component settings in O(N) time
+/// Afterwards, prev_settings looks like new_settings but with all
+/// existing data carried over from old to new
+fn merge_sorted_component_settings(
+    prev_settings: &mut Vec<ComponentSettings>,
+    new_settings: &Vec<ComponentSettings>,
+) {
+    let mut old_index = 0usize;
+    let mut new_index = 0usize;
+
+    let mut result = new_settings.clone();
+
+    loop {
+        if let (Some(old_setting), Some(new_setting)) =
+            (prev_settings.get(old_index), new_settings.get(new_index))
+        {
+            match sorted_component_cmp(
+                old_setting, &new_setting.entity_path, &new_setting.identifier
+            ) {
+                Ordering::Equal => {
+                    result[new_index] = old_setting.clone();
+                    old_index += 1;
+                    new_index += 1;
+                }
+                Ordering::Less => {
+                    new_index += 1;
+                }
+                Ordering::Greater => {
+                    old_index += 1;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    *prev_settings = result;
+}
+
+/// Compare component_settings to entity_path and component_identifier
+fn sorted_component_cmp(component_settings: &ComponentSettings, entity_path: &EntityPath, component_identifier: &ComponentIdentifier) -> Ordering {
+    if component_settings.entity_path == *entity_path {
+        if component_settings.identifier == *component_identifier {
+            return Ordering::Equal
+        }
+        if component_settings.identifier < *component_identifier {
+            return Ordering::Greater
+        }
+        return Ordering::Less
+    }
+    if component_settings.entity_path < *entity_path {
+        return Ordering::Greater
+    }
+    return Ordering::Less
 }
 
 // Required because we're using an incompatible version of

@@ -337,10 +337,11 @@ impl SeriesPointsSystem {
             );
 
             debug_assert_eq!(points_per_series.len(), series_names.len());
-            for (instance, (points, label, visible)) in itertools::izip!(
+            for (instance, (points, label, visible, component_identifier)) in itertools::izip!(
                 points_per_series.into_iter(),
                 series_names.into_iter(),
-                series_visibility.into_iter()
+                series_visibility.into_iter(),
+                std::iter::repeat(archetypes::Scalars::descriptor_scalars().component),
             )
             .enumerate()
             {
@@ -360,6 +361,7 @@ impl SeriesPointsSystem {
                     label,
                     // Aggregation for points is not supported.
                     re_types::components::AggregationPolicy::Off,
+                    component_identifier,
                     all_series,
                 );
             }

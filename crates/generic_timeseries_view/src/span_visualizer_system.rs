@@ -1,8 +1,7 @@
 use itertools::Itertools;
 use re_viewport_blueprint::ViewPropertyQueryError;
 use rerun::{
-    Component, Text,
-    external::{
+    Component, ComponentType, Text, external::{
         egui, re_chunk_store,
         re_entity_db::InstancePath,
         re_renderer,
@@ -11,7 +10,7 @@ use rerun::{
             self, IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError,
             VisualizerQueryInfo, VisualizerSystem,
         },
-    },
+    }
 };
 
 use crate::{
@@ -69,6 +68,10 @@ impl SeriesSpanSystem {
         Ok(())
     }
 
+    pub fn component_type() -> ComponentType {
+        Text::name()
+    }
+
     fn load_text_series(
         ctx: &ViewContext<'_>,
         view_query: &ViewQuery<'_>,
@@ -84,7 +87,7 @@ impl SeriesSpanSystem {
             .include_extended_bounds(true);
 
         // Get all components associated with our entity
-        let entity_components = get_entity_components(ctx, entity_path, Text::name());
+        let entity_components = get_entity_components(ctx, entity_path, Self::component_type());
 
         let results = range_with_blueprint_resolved_data(
             ctx,
@@ -145,6 +148,7 @@ impl SeriesSpanSystem {
                 instance_path,
                 label,
                 points,
+                component_identifier: component,
             });
         }
 

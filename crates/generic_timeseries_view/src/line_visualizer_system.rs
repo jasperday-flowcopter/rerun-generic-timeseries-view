@@ -17,7 +17,7 @@ use rerun::external::re_viewer_context::{
     VisualizerQueryInfo, VisualizerSystem,
 };
 use rerun::external::{egui, re_renderer, re_view};
-use rerun::{Scalars};
+use rerun::{ComponentType, Scalars};
 
 use crate::series_query::{
     allocate_plot_points, collect_colors, collect_radius_ui, collect_scalars,
@@ -103,6 +103,10 @@ impl SeriesLinesSystem {
         Ok(())
     }
 
+    pub fn component_type() -> ComponentType {
+        Scalars::descriptor_scalars().component_type.unwrap()
+    }
+
     fn load_series(
         ctx: &ViewContext<'_>,
         view_query: &ViewQuery<'_>,
@@ -129,9 +133,7 @@ impl SeriesLinesSystem {
                 .include_extended_bounds(true);
 
             // Get all components associated with our entity
-            let entity_components = get_entity_components(ctx, entity_path, Scalars::descriptor_scalars()
-                                                    .component_type
-                                                    .unwrap());
+            let entity_components = get_entity_components(ctx, entity_path, Self::component_type());
 
             let results = range_with_blueprint_resolved_data(
                 ctx,
@@ -331,32 +333,27 @@ impl SeriesLinesSystem {
             //     &archetypes::SeriesLines::descriptor_names(),
             // );
 
-
             let series_names = entity_components
                 .iter()
                 .zip(num_series_vec.iter())
                 .flat_map(|(c_id, n_series)| {
                     if *n_series == 1usize {
-                        Either::Left(std::iter::once(
-                            get_label(entity_path, c_id)
-                        ))
+                        Either::Left(std::iter::once(get_label(entity_path, c_id)))
                     } else {
-                        Either::Right((1..*n_series).map(|n| {
-                            format!(
-                                "{}.{}",
-                                get_label(entity_path, c_id),
-                                n
-                            )
-                        }))
+                        Either::Right(
+                            (1..*n_series)
+                                .map(|n| format!("{}.{}", get_label(entity_path, c_id), n)),
+                        )
                     }
                 })
                 .collect_vec();
 
             debug_assert_eq!(points_per_series.len(), series_names.len());
-            for (instance, (points, label, visible)) in itertools::izip!(
+            for (instance, (points, label, visible, component_identifier)) in itertools::izip!(
                 points_per_series.into_iter(),
                 series_names.into_iter(),
-                series_visibility.into_iter()
+                series_visibility.into_iter(),
+                entity_components.into_iter(),
             )
             .enumerate()
             {
@@ -375,6 +372,7 @@ impl SeriesLinesSystem {
                     view_query,
                     label,
                     aggregator,
+                    component_identifier,
                     all_series,
                 );
             }

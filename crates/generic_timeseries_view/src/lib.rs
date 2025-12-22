@@ -11,7 +11,9 @@ mod span_visualizer_system;
 mod series_query;
 mod util;
 mod view_class;
+mod ui;
 
+use rerun::ComponentIdentifier;
 use rerun::external::re_types::components::{AggregationPolicy, MarkerShape};
 use rerun::external::re_viewer_context::{self, external::re_entity_db::InstancePath};
 use rerun::external::egui;
@@ -78,6 +80,8 @@ pub enum PlotSeriesKind {
 pub struct PlotSeries {
     pub instance_path: InstancePath,
 
+    pub component_identifier: ComponentIdentifier,
+
     /// Id used for this series in the egui plot view.
     pub id: egui::Id,
 
@@ -121,6 +125,8 @@ pub enum TextSeriesKind {
 #[derive(Clone, Debug)]
 pub struct PlotTextSeries {
     pub instance_path: InstancePath,
+
+    pub component_identifier: ComponentIdentifier,
 
     /// Id used for this series in the egui plot view
     pub id: egui::Id,

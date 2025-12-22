@@ -111,6 +111,7 @@ pub fn points_to_series(
     query: &ViewQuery<'_>,
     series_label: String,
     aggregator: AggregationPolicy,
+    component_identifier: ComponentIdentifier,
     all_series: &mut Vec<PlotSeries>,
 ) {
     // re_tracing::profile_scope!("secondary", &instance_path.to_string());
@@ -142,6 +143,7 @@ pub fn points_to_series(
             aggregator,
             aggregation_factor,
             min_time,
+            component_identifier
         });
     } else {
         add_series_runs(
@@ -153,6 +155,7 @@ pub fn points_to_series(
             aggregation_factor,
             min_time,
             all_series,
+            component_identifier
         );
     }
 }
@@ -234,6 +237,7 @@ fn add_series_runs(
     aggregation_factor: f64,
     min_time: i64,
     all_series: &mut Vec<PlotSeries>,
+    component_identifier: ComponentIdentifier
 ) {
     // re_tracing::profile_function!();
 
@@ -253,6 +257,7 @@ fn add_series_runs(
         aggregator,
         aggregation_factor,
         min_time,
+        component_identifier
     };
 
     for (i, p) in points.into_iter().enumerate() {
@@ -279,6 +284,7 @@ fn add_series_runs(
                     aggregator,
                     aggregation_factor,
                     min_time,
+                    component_identifier
                 },
             );
 
@@ -309,10 +315,11 @@ fn add_series_runs(
 pub fn get_entity_components(
     ctx: &ViewContext<'_>,
     entity_path: &EntityPath,
-    identifier: ComponentType,
+    component_type: ComponentType,
 ) -> Vec<ComponentIdentifier> {
     let storage_engine = ctx.recording().storage_engine_arc();
     let store = storage_engine.store();
+
     store
         .all_components_for_entity(entity_path)
         .map(|component| {
@@ -324,7 +331,7 @@ pub fn get_entity_components(
                         .is_some_and(|descriptor| {
                             descriptor.component_type.is_some_and(|c_type| {
                                 // make sure that we have the correct type here
-                                c_type == identifier
+                                c_type == component_type
                             })
                         })
                 })
