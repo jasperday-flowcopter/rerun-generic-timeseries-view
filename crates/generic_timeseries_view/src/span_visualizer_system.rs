@@ -1,12 +1,18 @@
 use itertools::Itertools;
 use re_viewport_blueprint::ViewPropertyQueryError;
 use rerun::{
-    Component, ComponentType, Text, external::{
-        egui::{self, Color32}, re_chunk_store, re_entity_db::InstancePath, re_renderer, re_view::{RangeResultsExt, range_with_blueprint_resolved_data}, re_viewer_context::{
+    Component, ComponentType, Text,
+    external::{
+        egui::{self, Color32},
+        re_chunk_store,
+        re_entity_db::InstancePath,
+        re_view::{RangeResultsExt, range_with_blueprint_resolved_data},
+        re_viewer_context::{
             self, IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError,
-            VisualizerQueryInfo, VisualizerSystem, auto_color_for_entity_path,
-        }
-    }
+            VisualizerExecutionOutput, VisualizerQueryInfo, VisualizerSystem,
+            auto_color_for_entity_path,
+        },
+    },
 };
 
 use crate::{
@@ -35,9 +41,9 @@ impl VisualizerSystem for SeriesSpanSystem {
         ctx: &ViewContext<'_>,
         query: &ViewQuery<'_>,
         _context: &re_viewer_context::ViewContextCollection,
-    ) -> Result<Vec<re_renderer::QueueableDrawData>, ViewSystemExecutionError> {
+    ) -> Result<VisualizerExecutionOutput, ViewSystemExecutionError> {
         self.load_text(ctx, query)?;
-        Ok(Vec::new())
+        Ok(VisualizerExecutionOutput::default())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -74,7 +80,6 @@ impl SeriesSpanSystem {
         data_result: &re_viewer_context::DataResult,
         all_series: &mut Vec<PlotTextSeries>,
     ) -> Result<(), ViewPropertyQueryError> {
-
         let time_range = util::determine_time_range(ctx, data_result)?;
         let entity_path = &data_result.entity_path;
         let query = re_chunk_store::RangeQuery::new(view_query.timeline, time_range)
@@ -107,9 +112,8 @@ impl SeriesSpanSystem {
             // let times = all_text_chunks.iter()
             //             .flat_map(|chunk| chunk.iter_component_timepoints());
 
-            let strings_chunks = results
-                .iter_as(timeline.to_owned(), component);
-            
+            let strings_chunks = results.iter_as(timeline.to_owned(), component);
+
             let strings = strings_chunks.slice::<String>();
 
             let label = get_label(entity_path, &component);
@@ -123,25 +127,28 @@ impl SeriesSpanSystem {
             let points_all_times = strings
                 .map(|((data_time, _row_id), entries)| {
                     (data_time.as_i64(), entries.concat().to_string())
-                }).collect_vec();
-            
-            let points_filtered_inner = points_all_times.iter()
-                .zip(points_all_times.iter().skip(1))
-                .filter(|((_time_last, label_last), (_time, label))| {
-                    label != label_last
                 })
+                .collect_vec();
+
+            let points_filtered_inner = points_all_times
+                .iter()
+                .zip(points_all_times.iter().skip(1))
+                .filter(|((_time_last, label_last), (_time, label))| label != label_last)
                 .map(|(_a, b)| b.to_owned());
-            
+
             let points = std::iter::once(points_all_times[0].clone())
                 .chain(points_filtered_inner)
                 .chain(std::iter::once(points_all_times.last().unwrap().to_owned()))
                 .collect_vec();
 
-            let colors: Vec<_> = points.iter().map(|(_time, label)| {
-                let mut id = label.to_string();
-                id.push_str(component.as_str());
-              Color32::from(auto_color_for_entity_path(&id.into())).gamma_multiply(0.15)
-            }).collect();
+            let colors: Vec<_> = points
+                .iter()
+                .map(|(_time, label)| {
+                    let mut id = label.to_string();
+                    id.push_str(component.as_str());
+                    Color32::from(auto_color_for_entity_path(&id.into())).gamma_multiply(0.15)
+                })
+                .collect();
 
             all_series.push(PlotTextSeries {
                 id: egui::Id::new(&instance_path),
@@ -151,7 +158,7 @@ impl SeriesSpanSystem {
                 label,
                 points,
                 component_identifier: component,
-                colors
+                colors,
             });
         }
 

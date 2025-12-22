@@ -1,21 +1,23 @@
 use itertools::{Either, Itertools as _};
 
-use rerun::{ComponentType, Scalars};
 use rerun::external::re_chunk_store::{self, LatestAtQuery};
-use rerun::external::re_types::{
+use rerun::external::re_sdk_types::{
     Archetype as _, archetypes,
     components::{Color, MarkerShape, MarkerSize},
 };
 use rerun::external::re_view::{
-    self, clamped_or_nothing, latest_at_with_blueprint_resolved_data, range_with_blueprint_resolved_data
+    self, clamped_or_nothing, latest_at_with_blueprint_resolved_data,
+    range_with_blueprint_resolved_data,
 };
-use rerun::external::{re_query, re_renderer, re_types, re_viewer_context};
 use rerun::external::re_viewer_context::{
-    IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError, VisualizerQueryInfo,
-    VisualizerSystem, external::re_entity_db::InstancePath, typed_fallback_for,
+    IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError,
+    VisualizerExecutionOutput, VisualizerQueryInfo, VisualizerSystem,
+    external::re_entity_db::InstancePath, typed_fallback_for,
 };
-use re_viewport_blueprint::ViewPropertyQueryError;
+use rerun::external::{re_query, re_sdk_types, re_viewer_context};
+use rerun::{ComponentType, Scalars};
 
+use crate::LoadSeriesError;
 use crate::util::{get_entity_components, get_label};
 use crate::{
     PlotPoint, PlotPointAttrs, PlotSeries, PlotSeriesKind, ScatterAttrs,
@@ -48,11 +50,11 @@ impl VisualizerSystem for SeriesPointsSystem {
         ctx: &ViewContext<'_>,
         query: &ViewQuery<'_>,
         _context: &re_viewer_context::ViewContextCollection,
-    ) -> Result<Vec<re_renderer::QueueableDrawData>, ViewSystemExecutionError> {
+    ) -> Result<VisualizerExecutionOutput, ViewSystemExecutionError> {
         // re_tracing::profile_function!();
 
         self.load_scalars(ctx, query)?;
-        Ok(Vec::new())
+        Ok(VisualizerExecutionOutput::default())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -65,7 +67,7 @@ impl SeriesPointsSystem {
         &mut self,
         ctx: &ViewContext<'_>,
         query: &ViewQuery<'_>,
-    ) -> Result<(), ViewPropertyQueryError> {
+    ) -> Result<VisualizerExecutionOutput, ViewSystemExecutionError> {
         // re_tracing::profile_function!();
 
         let plot_mem =
@@ -74,33 +76,29 @@ impl SeriesPointsSystem {
 
         let data_results = query.iter_visible_data_results(Self::identifier());
 
-        let parallel_loading = true;
-        if parallel_loading {
-            use rayon::prelude::*;
-            // re_tracing::profile_wait!("load_series");
-            for mut one_series in data_results
-                .collect_vec()
-                .par_iter()
-                .map(
-                    |data_result| -> Result<Vec<PlotSeries>, ViewPropertyQueryError> {
-                        let mut series = vec![];
-                        Self::load_series(ctx, query, time_per_pixel, data_result, &mut series)?;
-                        Ok(series)
-                    },
-                )
-                .collect::<Result<Vec<_>, ViewPropertyQueryError>>()?
-            {
-                self.all_series.append(&mut one_series);
+        use rayon::prelude::*;
+
+        let mut output = VisualizerExecutionOutput::default();
+
+        // re_tracing::profile_wait!("load_series");
+        for result in data_results
+            .collect_vec()
+            .par_iter()
+            .map(|data_result| Self::load_series(ctx, query, time_per_pixel, data_result))
+            .collect::<Vec<_>>()
+        {
+            match result {
+                Err(LoadSeriesError::ViewPropertyQuery(err)) => return Err(err.into()),
+                Err(LoadSeriesError::EntitySpecificVisualizerError { entity_path, error }) => {
+                    output.report_error_for(entity_path, error);
+                }
+                Ok(one_series) => {
+                    self.all_series.extend(one_series);
+                }
             }
-        } else {
-            let mut series = vec![];
-            for data_result in data_results {
-                Self::load_series(ctx, query, time_per_pixel, data_result, &mut series)?;
-            }
-            self.all_series = series;
         }
 
-        Ok(())
+        Ok(output)
     }
 
     pub fn component_type() -> ComponentType {
@@ -112,8 +110,7 @@ impl SeriesPointsSystem {
         view_query: &ViewQuery<'_>,
         time_per_pixel: f64,
         data_result: &re_viewer_context::DataResult,
-        all_series: &mut Vec<PlotSeries>,
-    ) -> Result<(), ViewPropertyQueryError> {
+    ) -> Result<Vec<PlotSeries>, LoadSeriesError> {
         // re_tracing::profile_function!();
 
         let current_query = ctx.current_query();
@@ -154,7 +151,10 @@ impl SeriesPointsSystem {
                 .collect_vec();
 
             if all_scalar_chunks_vec.is_empty() {
-                return Ok(());
+                return Err(LoadSeriesError::EntitySpecificVisualizerError {
+                    entity_path: data_result.entity_path.clone(),
+                    error: "No valid scalar data found".to_owned(),
+                });
             }
 
             // All the default values for a `PlotPoint`, accounting for both overrides and default values.
@@ -195,7 +195,12 @@ impl SeriesPointsSystem {
                     all_scalar_chunks,
                     total_num_series,
                 ),
-                None => return Ok(()),
+                None => {
+                    return Err(LoadSeriesError::EntitySpecificVisualizerError {
+                        entity_path: data_result.entity_path.clone(),
+                        error: "No points in first series".to_owned(),
+                    });
+                }
             };
 
             let mut start_idx = 0;
@@ -280,10 +285,9 @@ impl SeriesPointsSystem {
                             )
                             .next()
                         {
-                            for (points, marker_shape) in points_per_series
-                                .iter_mut()
-                                .zip(clamped_or_nothing(marker_shapes.as_slice(), total_num_series))
-                            {
+                            for (points, marker_shape) in points_per_series.iter_mut().zip(
+                                clamped_or_nothing(marker_shapes.as_slice(), total_num_series),
+                            ) {
                                 for point in points {
                                     point.attrs.kind = PlotSeriesKind::Scatter(ScatterAttrs {
                                         marker: *marker_shape,
@@ -374,6 +378,8 @@ impl SeriesPointsSystem {
                 })
                 .collect_vec();
 
+            let mut series = Vec::with_capacity(total_num_series);
+            
             debug_assert_eq!(points_per_series.len(), series_names.len());
             for (instance, (points, label, visible, component_identifier)) in itertools::izip!(
                 points_per_series.into_iter(),
@@ -398,13 +404,13 @@ impl SeriesPointsSystem {
                     view_query,
                     label,
                     // Aggregation for points is not supported.
-                    re_types::components::AggregationPolicy::Off,
+                    re_sdk_types::components::AggregationPolicy::Off,
                     component_identifier,
-                    all_series,
+                    &mut series,
                 );
             }
+            Ok(series)
+            
         }
-
-        Ok(())
     }
 }

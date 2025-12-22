@@ -1,6 +1,6 @@
 use re_viewport_blueprint::{ViewProperty, ViewPropertyQueryError};
 use rerun::external::re_log_types::{self, AbsoluteTimeRange};
-use rerun::external::re_types::{
+use rerun::external::re_sdk_types::{
     blueprint::{archetypes::TimeAxis, components::LinkAxis},
     components::AggregationPolicy,
     datatypes::{TimeRange, TimeRangeBoundary},
@@ -8,7 +8,7 @@ use rerun::external::re_types::{
 use rerun::external::re_viewer_context::{
     ViewContext, ViewQuery, ViewerContext, external::re_entity_db::InstancePath,
 };
-use rerun::external::{egui, re_chunk_store, re_log, re_types, re_viewer_context};
+use rerun::external::{egui, re_chunk_store, re_log, re_sdk_types, re_viewer_context};
 use rerun::{ComponentIdentifier, ComponentType, EntityPath};
 
 use crate::{
@@ -49,10 +49,12 @@ pub fn determine_time_range(
     let visible_time_range = match query_range {
         re_viewer_context::QueryRange::TimeRange(time_range) => time_range.clone(),
         re_viewer_context::QueryRange::LatestAt => {
-            re_log::error_once!(
-                "Unexpected LatestAt query for time series data result at path {:?}",
-                data_result.entity_path
-            );
+            if cfg!(debug_assertions) {
+                re_log::error_once!(
+                    "[DEBUG] Unexpected LatestAt query for time series data result at path {:?}",
+                    data_result.entity_path
+                );
+            }
             TimeRange {
                 start: TimeRangeBoundary::AT_CURSOR,
                 end: TimeRangeBoundary::AT_CURSOR,
@@ -82,8 +84,8 @@ pub fn determine_time_range(
     };
 
     let view_time_range = time_range_property
-        .component_or_empty::<re_types::blueprint::components::TimeRange>(
-            re_types::blueprint::archetypes::TimeAxis::descriptor_view_range().component,
+        .component_or_empty::<re_sdk_types::blueprint::components::TimeRange>(
+            re_sdk_types::blueprint::archetypes::TimeAxis::descriptor_view_range().component,
         )
         .ok()
         .flatten();

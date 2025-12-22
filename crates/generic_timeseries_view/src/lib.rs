@@ -13,8 +13,9 @@ mod util;
 mod view_class;
 mod ui;
 
-use rerun::{ComponentIdentifier};
-use rerun::external::re_types::components::{AggregationPolicy, MarkerShape};
+use re_viewport_blueprint::ViewPropertyQueryError;
+use rerun::{ComponentIdentifier, EntityPath};
+use rerun::external::re_sdk_types::components::{AggregationPolicy, MarkerShape};
 use rerun::external::re_viewer_context::{self, external::re_entity_db::InstancePath};
 use rerun::external::egui::{self, Color32};
 
@@ -112,6 +113,20 @@ pub struct PlotSeries {
     /// How many raw data points were aggregated into a single step of the graph?
     /// This is an average.
     pub aggregation_factor: f64,
+}
+
+enum LoadSeriesError {
+    ViewPropertyQuery(ViewPropertyQueryError),
+    EntitySpecificVisualizerError {
+        entity_path: EntityPath,
+        error: String
+    }
+}
+
+impl From<ViewPropertyQueryError> for LoadSeriesError {
+    fn from(err: ViewPropertyQueryError) -> Self {
+        Self::ViewPropertyQuery(err)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
