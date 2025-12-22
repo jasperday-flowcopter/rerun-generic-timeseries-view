@@ -845,6 +845,7 @@ impl ViewClass for TimeSeriesView {
                     plot_ui,
                     all_span_series.into_iter().collect_vec().as_slice(),
                     time_offset,
+                    x_range.end(),
                 );
 
                 add_series_to_plot(
@@ -1201,6 +1202,7 @@ fn add_span_to_plot(
     plot_ui: &mut egui_plot::PlotUi<'_>,
     all_plot_series: &[&crate::PlotTextSeries],
     time_offset: i64,
+    max_time: f64,
 ) {
     for series in all_plot_series {
         if series.visible {
@@ -1208,14 +1210,14 @@ fn add_span_to_plot(
             for (i, ((time_raw, label), color)) in
                 series.points.iter().zip(series.colors.iter()).enumerate()
             {
-                if i == n_points - 1 {
-                    break;
-                }
-
                 let time = (time_raw - time_offset) as f64;
 
                 let range = {
-                    let next_time = (series.points[i + 1].0 - time_offset) as f64;
+                    let next_time = if i == n_points - 1 {
+                        max_time
+                    } else {
+                        (series.points[i + 1].0 - time_offset) as f64
+                    };
                     time..=next_time
                 };
                 let span = egui_plot::Span::new(label, range).fill(*color);
