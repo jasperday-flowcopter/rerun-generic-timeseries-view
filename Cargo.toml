@@ -1,0 +1,79 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+authors = ["Jasper Day <jasper.day@flowcopter.com>"]
+edition = "2024"
+homepage = "https://flowcopter.com"
+include = [
+    "../../Cargo.lock", # So that users can pass `--locked` to `cargo install`
+    "**/*.rs",
+    "Cargo.toml",
+]
+license = "MIT"
+repository = "https://github.com/flowcopter/rerun"
+rust-version = "1.88"
+version = "0.1.0"
+
+# ---------------------------------------------------------------------------
+
+## Dev
+
+# Our dev profile has some optimizations turned on, as well as debug assertions.
+[profile.dev]
+opt-level = 1 # Make debug builds run faster
+# See <https://github.com/rerun-io/rerun/pull/9094> for a thorough explanation of why.
+# This does not affect cfg(debug_assertions).
+# Use the `debugging` profile (see below) if you need debug symbols.
+debug = false
+
+[profile.dev.package]
+"fc_rerun".debug = true
+"generic_timeseries_view".debug = true
+
+# Optimize all dependencies even in debug builds (does not affect workspace packages):
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+# debug = true # good for profilers
+panic = "abort" # This leads to better optimizations and smaller binaries (and is the default in Wasm anyways).
+lto = "thin" # This leads to smaller binaries, but slower compile times.
+codegen-units = 1 # Smaller binaries (but slower compile time)
+
+# Set up a `debugging` profile that turns of optimization of the workspace and select packages.
+# Note that the profile name `debug` is reserved.
+[profile.debugging]
+inherits = "dev"
+opt-level = 0
+debug = true
+
+[profile.debugging.package.egui]
+opt-level = 0 # we often debug egui via Rerun
+
+[profile.debugging.build-override]
+debug = true # enable debug symbols for build scripts
+
+# ---------------------------------------------------------------------------
+
+[workspace.dependencies]
+rerun = { version = "0.28.1", features = ["native_viewer", "sdk", "server"] }
+# dependencies rerun does not expose in rerun::external :(
+# building against rerun 0.27.2
+argh = "0.1.13"
+egui_plot = {git = "https://github.com/emilk/egui_plot", rev = "e6fb403e1c8efccf56fe0a9e3aa31e7782d33c8c"} # https://github.com/emilk/egui_plot
+itertools = "0.14.0"
+mimalloc = { version = "0.1.48", features = ["v3"] }
+rayon = "1.11"
+re_viewport_blueprint = "0.28.1"
+smallvec = { version = "1.15", features = ["const_generics", "union"] }
+thiserror = "2.0.17"
+tempfile = "3.23"
+serde = { version = "1.0", features = ["derive"] }
+egui_extras = { version = "0.33.3", features = ["http", "image", "serde", "svg"] }
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png"] }
+
+# ---------------------------------------------------------------------------
+
+[workspace.lints]
