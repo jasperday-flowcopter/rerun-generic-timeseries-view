@@ -1,9 +1,12 @@
 //! Column visibility in the generic time series blueprint
 
 use rerun::external::{
-    egui::{self, PopupCloseBehavior, containers::menu::{MenuButton, MenuConfig}},
+    egui::{
+        self, PopupCloseBehavior,
+        containers::menu::{MenuButton, MenuConfig},
+    },
     re_ui::{UiExt, list_item},
-    re_viewer_context::{ViewerContext},
+    re_viewer_context::ViewerContext,
 };
 
 use crate::view_class::ComponentSettings;
@@ -22,7 +25,7 @@ pub fn selection_ui_column_visibility(
     let hidden_count = column_settings.len() - visible_count;
     let visible_count_label = format!("{visible_count} visible, {hidden_count} hidden");
 
-    let mut new_settings: Vec<_> = column_settings.iter().cloned().collect();
+    let mut new_settings = column_settings.to_vec();
 
     let modal_ui = |ui: &mut egui::Ui| {
         //
@@ -54,25 +57,27 @@ pub fn selection_ui_column_visibility(
         //
 
         let mut current_entity = None;
-        for column in &mut new_settings {
-            if Some(&column.entity_path) != current_entity.as_ref() {
-                current_entity = Some(column.entity_path.clone());
-                ui.add_space(6.0);
-                ui.label(column.entity_path.to_string());
-            }
+        egui::Grid::new("modal_series_settings")
+            .num_columns(5)
+            .show(ui, |ui| {
+                for column in &mut new_settings {
+                    if Some(&column.entity_path) != current_entity.as_ref() {
+                        current_entity = Some(column.entity_path.clone());
+                        ui.label(column.entity_path.to_string());
+                        ui.end_row();
+                    }
 
-            let mut is_visible = column.enabled;
-
-            if ui
-                .re_checkbox(&mut is_visible, column.identifier.as_str())
-                .changed()
-            {
-                column.enabled = is_visible;
-            }
-        }
+                    ui.re_checkbox(&mut column.enabled, column.identifier.as_str());
+                    ui.label("Offset");
+                    ui.add(egui::DragValue::new(&mut column.offset).speed(0.01));
+                    ui.label("Scale");
+                    ui.add(egui::DragValue::new(&mut column.scale).speed(0.01));
+                    ui.end_row();
+                }
+            })
     };
 
-    ui.list_item_flat_noninteractive(list_item::PropertyContent::new("Enable Series").value_fn(
+    ui.list_item_flat_noninteractive(list_item::PropertyContent::new("Series Settings").value_fn(
         |ui, _| {
             MenuButton::new(&visible_count_label)
                 .config(

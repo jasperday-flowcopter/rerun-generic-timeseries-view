@@ -305,13 +305,11 @@ impl ViewClass for TimeSeriesView {
     ) -> Result<(), ViewSystemExecutionError> {
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
 
-        ui.label("Test");
-
         list_item::list_item_scope(ui, "generic_time_series_selection_ui", |ui| {
             
             // Mutably borrow state here
             state.component_settings =
-            selection_ui_column_visibility(&viewer_ctx, ui, &state.component_settings);
+            selection_ui_column_visibility(viewer_ctx, ui, &state.component_settings);
 
             // Immutably borrow here for the rest of scope
             let ctx = self.view_context(viewer_ctx, view_id, state);
@@ -486,7 +484,7 @@ impl ViewClass for TimeSeriesView {
         
         let entities = query
             .iter_all_entities()
-            .map(|entity| entity.clone())
+            .cloned()
             .collect::<Vec<_>>();
 
         let component_settings = {
@@ -514,20 +512,27 @@ impl ViewClass for TimeSeriesView {
         let line_series = system_output.view_systems.get::<SeriesLinesSystem>()?;
         let point_series = system_output.view_systems.get::<SeriesPointsSystem>()?;
         let span_series = system_output.view_systems.get::<SeriesSpanSystem>()?;
-        let all_plot_series: Vec<_> = std::iter::empty()
+        let all_plot_series_offsets_scales: Vec<_> = std::iter::empty()
             .chain(line_series.all_series.iter())
             .chain(point_series.all_series.iter())
-            .filter(
+            .filter_map(
                 |series| {
                     let idx = state.component_settings.binary_search_by(|settings| 
                         // binary search should indicate whether the argument is Less / Equal / Greater than target
                         // sorted_component_cmp indicates whether the series is Less / Equal / Greater than the argument, hence .reverse()
                         sorted_component_cmp(settings, &series.instance_path.entity_path, &series.component_identifier).reverse()
                     ).unwrap();
-                    state.component_settings[idx].enabled
+                    let settings = &state.component_settings[idx];
+                    if settings.enabled {
+                        Some((series, settings.offset, settings.scale))
+                    } else {
+                        None
+                    }
                 }
             )
             .collect();
+        let offsets_scales: Vec<_> = all_plot_series_offsets_scales.iter().map(|x| (x.1, x.2)).collect();
+        let all_plot_series: Vec<_> = all_plot_series_offsets_scales.into_iter().map(|x| x.0).collect();
 
         let all_span_series: Vec<_> = span_series.all_series.iter().filter(|series| {
             let idx = state.component_settings.binary_search_by(|settings| {
@@ -592,7 +597,7 @@ impl ViewClass for TimeSeriesView {
                     .iter()
                     .last()
                     .map(|(time, _)| time)
-                    .unwrap_or(&i64::min_value())
+                    .unwrap_or(&i64::MIN)
                     .to_owned()
             }))
             .max()
@@ -869,6 +874,7 @@ impl ViewClass for TimeSeriesView {
                     &all_plot_series,
                     time_offset,
                     &mut state.scalar_range,
+                    &offsets_scales,
                 );
             });
 
@@ -1135,26 +1141,30 @@ fn add_series_to_plot(
     all_plot_series: &[&crate::PlotSeries],
     time_offset: i64,
     scalar_range: &mut Range1D,
+    offsets_scales: &[(f64, f64)],
 ) {
     // re_tracing::profile_function!();
 
     *scalar_range.start_mut() = f64::INFINITY;
     *scalar_range.end_mut() = f64::NEG_INFINITY;
 
-    for series in all_plot_series {
+    for (series, (offset, scale)) in all_plot_series.iter().zip(offsets_scales.iter()) {
+        let linear_transform = |p: f64| p * *scale + *offset;
+
         let points = if series.visible {
             series
                 .points
                 .iter()
                 .map(|p| {
-                    if p.1 < scalar_range.start() {
-                        *scalar_range.start_mut() = p.1;
+                    let y = linear_transform(p.1);
+                    if y < scalar_range.start() {
+                        *scalar_range.start_mut() = y;
                     }
-                    if p.1 > scalar_range.end() {
-                        *scalar_range.end_mut() = p.1;
+                    if y > scalar_range.end() {
+                        *scalar_range.end_mut() = y;
                     }
 
-                    [(p.0 - time_offset) as _, p.1]
+                    [(p.0 - time_offset) as _, y]
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1205,7 +1215,7 @@ fn add_span_to_plot(
     for series in all_plot_series {
         if series.visible {
             let n_points = series.points.len();
-            for (i, (time_raw, label)) in series.points.iter().enumerate() {
+            for (i, ((time_raw, label), color)) in series.points.iter().zip(series.colors.iter()).enumerate() {
                 if i == n_points - 1 {
                     break;
                 }
@@ -1216,7 +1226,7 @@ fn add_span_to_plot(
                     let next_time = (series.points[i + 1].0 - time_offset) as f64;
                     time..=next_time
                 };
-                let span = egui_plot::Span::new(label, range);
+                let span = egui_plot::Span::new(label, range).fill(*color);
                 plot_ui.span(span);
             }
         }
@@ -1319,15 +1329,14 @@ fn make_range_sane(y_range: Range1D) -> Range1D {
 /// existing data carried over from old to new
 fn merge_sorted_component_settings(
     prev_settings: &mut Vec<ComponentSettings>,
-    new_settings: &Vec<ComponentSettings>,
+    new_settings: &[ComponentSettings],
 ) {
     let mut old_index = 0usize;
     let mut new_index = 0usize;
 
-    let mut result = new_settings.clone();
+    let mut result = new_settings.to_owned();
 
-    loop {
-        if let (Some(old_setting), Some(new_setting)) =
+    while let (Some(old_setting), Some(new_setting)) =
             (prev_settings.get(old_index), new_settings.get(new_index))
         {
             match sorted_component_cmp(
@@ -1345,10 +1354,7 @@ fn merge_sorted_component_settings(
                     old_index += 1;
                 }
             }
-        } else {
-            break;
         }
-    }
 
     *prev_settings = result;
 }
@@ -1357,17 +1363,17 @@ fn merge_sorted_component_settings(
 fn sorted_component_cmp(component_settings: &ComponentSettings, entity_path: &EntityPath, component_identifier: &ComponentIdentifier) -> Ordering {
     if component_settings.entity_path == *entity_path {
         if component_settings.identifier == *component_identifier {
-            return Ordering::Equal
+            return Ordering::Equal;
         }
         if component_settings.identifier < *component_identifier {
-            return Ordering::Greater
+            return Ordering::Greater;
         }
-        return Ordering::Less
+        return Ordering::Less;
     }
     if component_settings.entity_path < *entity_path {
-        return Ordering::Greater
+        return Ordering::Greater;
     }
-    return Ordering::Less
+    Ordering::Less
 }
 
 // Required because we're using an incompatible version of

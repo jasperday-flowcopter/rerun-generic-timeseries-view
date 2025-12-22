@@ -2,14 +2,10 @@ use itertools::Itertools;
 use re_viewport_blueprint::ViewPropertyQueryError;
 use rerun::{
     Component, ComponentType, Text, external::{
-        egui, re_chunk_store,
-        re_entity_db::InstancePath,
-        re_renderer,
-        re_view::{RangeResultsExt, range_with_blueprint_resolved_data},
-        re_viewer_context::{
+        egui::{self, Color32}, re_chunk_store, re_entity_db::InstancePath, re_renderer, re_view::{RangeResultsExt, range_with_blueprint_resolved_data}, re_viewer_context::{
             self, IdentifiedViewSystem, ViewContext, ViewQuery, ViewSystemExecutionError,
-            VisualizerQueryInfo, VisualizerSystem,
-        },
+            VisualizerQueryInfo, VisualizerSystem, auto_color_for_entity_path,
+        }
     }
 };
 
@@ -141,6 +137,12 @@ impl SeriesSpanSystem {
                 .chain(std::iter::once(points_all_times.last().unwrap().to_owned()))
                 .collect_vec();
 
+            let colors: Vec<_> = points.iter().map(|(_time, label)| {
+                let mut id = label.to_string();
+                id.push_str(component.as_str());
+              Color32::from(auto_color_for_entity_path(&id.into())).gamma_multiply(0.15)
+            }).collect();
+
             all_series.push(PlotTextSeries {
                 id: egui::Id::new(&instance_path),
                 visible: true,
@@ -149,6 +151,7 @@ impl SeriesSpanSystem {
                 label,
                 points,
                 component_identifier: component,
+                colors
             });
         }
 

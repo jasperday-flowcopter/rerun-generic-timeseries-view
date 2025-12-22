@@ -13,10 +13,10 @@ mod util;
 mod view_class;
 mod ui;
 
-use rerun::ComponentIdentifier;
+use rerun::{ComponentIdentifier};
 use rerun::external::re_types::components::{AggregationPolicy, MarkerShape};
 use rerun::external::re_viewer_context::{self, external::re_entity_db::InstancePath};
-use rerun::external::egui;
+use rerun::external::egui::{self, Color32};
 
 pub use view_class::TimeSeriesView;
 
@@ -142,4 +142,6 @@ pub struct PlotTextSeries {
     pub label: String,
 
     pub points: Vec<(i64, String)>,
+
+    pub colors: Vec<Color32>,
 }
