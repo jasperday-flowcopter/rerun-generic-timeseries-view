@@ -8,7 +8,7 @@ use rerun::external::{re_query, re_renderer};
 use rerun::external::re_types::external::arrow::datatypes::DataType as ArrowDatatype;
 use rerun::external::re_types::{ComponentDescriptor, ComponentIdentifier, Loggable as _, RowId, components};
 use rerun::external::re_view::{self, ChunksWithComponent, HybridRangeResults, RangeResultsExt as _, clamped_or_nothing};
-use rerun::external::re_viewer_context::{QueryContext, auto_color_egui, typed_fallback_for};
+use rerun::external::re_viewer_context::{auto_color_egui};
 
 use crate::{PlotPoint, PlotSeriesKind};
 
@@ -225,49 +225,6 @@ pub fn collect_colors(
             });
         }
     }
-}
-
-/// Collects series names for the series into pre-allocated plot points.
-pub fn collect_series_name(
-    query_ctx: &QueryContext<'_>,
-    bootstrapped_results: &re_view::HybridLatestAtResults<'_>,
-    results: &re_view::HybridRangeResults<'_>,
-    num_series: usize,
-    name_descriptor: &ComponentDescriptor,
-) -> Vec<String> {
-    // re_tracing::profile_function!();
-
-    let mut series_names: Vec<String> = bootstrapped_results
-        .get_optional_chunks(name_descriptor.component)
-        .iter()
-        .chain(
-            results
-                .get_optional_chunks(name_descriptor.component)
-                .iter(),
-        )
-        .find(|chunk| !chunk.is_empty())
-        .and_then(|chunk| {
-            chunk
-                .iter_slices::<String>(name_descriptor.component)
-                .next()
-        })
-        .map(|slice| slice.into_iter().map(|s| s.to_string()).collect())
-        .unwrap_or_default();
-
-    if series_names.len() < num_series {
-        let fallback_name: String =
-            typed_fallback_for::<components::Name>(query_ctx, name_descriptor.component)
-                .to_string();
-        if num_series == 1 {
-            series_names.push(fallback_name);
-        } else {
-            // Repeating a name never makes sense, so we fill up the remaining names with made up ones instead.
-            series_names
-                .extend((series_names.len()..num_series).map(|i| format!("{fallback_name}/{i}")));
-        }
-    }
-
-    series_names
 }
 
 /// Collects `radius_ui` for the series into pre-allocated plot points.

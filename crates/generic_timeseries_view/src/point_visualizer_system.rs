@@ -1,5 +1,6 @@
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 
+use rerun::{ComponentType, Scalars};
 use rerun::external::re_chunk_store::{self, LatestAtQuery};
 use rerun::external::re_types::{
     Archetype as _, archetypes,
@@ -15,11 +16,12 @@ use rerun::external::re_viewer_context::{
 };
 use re_viewport_blueprint::ViewPropertyQueryError;
 
+use crate::util::{get_entity_components, get_label};
 use crate::{
     PlotPoint, PlotPointAttrs, PlotSeries, PlotSeriesKind, ScatterAttrs,
     series_query::{
         all_scalars_indices, allocate_plot_points, collect_colors, collect_radius_ui,
-        collect_scalars, collect_series_name, collect_series_visibility, determine_num_series,
+        collect_scalars, collect_series_visibility, determine_num_series,
     },
     util,
 };
@@ -38,15 +40,7 @@ impl IdentifiedViewSystem for SeriesPointsSystem {
 
 impl VisualizerSystem for SeriesPointsSystem {
     fn visualizer_query_info(&self) -> VisualizerQueryInfo {
-        let mut query_info = VisualizerQueryInfo::from_archetype::<archetypes::Scalars>();
-        query_info
-            .queried
-            .extend(archetypes::SeriesPoints::all_components().iter().cloned());
-
-        query_info.relevant_archetypes =
-            std::iter::once(archetypes::SeriesPoints::name()).collect();
-
-        query_info
+        VisualizerQueryInfo::empty()
     }
 
     fn execute(
@@ -109,6 +103,10 @@ impl SeriesPointsSystem {
         Ok(())
     }
 
+    pub fn component_type() -> ComponentType {
+        Scalars::descriptor_scalars().component_type.unwrap()
+    }
+
     fn load_series(
         ctx: &ViewContext<'_>,
         view_query: &ViewQuery<'_>,
@@ -133,21 +131,31 @@ impl SeriesPointsSystem {
             let entity_path = &data_result.entity_path;
             let query = re_chunk_store::RangeQuery::new(view_query.timeline, time_range);
 
+            let entity_components = get_entity_components(ctx, entity_path, Self::component_type());
+
             let results = range_with_blueprint_resolved_data(
                 ctx,
                 None,
                 &query,
                 data_result,
                 archetypes::Scalars::all_component_identifiers()
-                    .chain(archetypes::SeriesPoints::all_component_identifiers()),
+                    .chain(archetypes::SeriesPoints::all_component_identifiers())
+                    .chain(entity_components.clone()),
             );
 
             // If we have no scalars, we can't do anything.
-            let Some(all_scalar_chunks) =
-                results.get_required_chunks(archetypes::Scalars::descriptor_scalars().component)
-            else {
+            let all_scalar_chunks_vec = entity_components
+                .iter()
+                .chain(std::iter::once(
+                    &archetypes::Scalars::descriptor_scalars().component,
+                ))
+                .unique()
+                .filter_map(|c_id| results.get_required_chunks(c_id.to_owned()))
+                .collect_vec();
+
+            if all_scalar_chunks_vec.is_empty() {
                 return Ok(());
-            };
+            }
 
             // All the default values for a `PlotPoint`, accounting for both overrides and default values.
             let fallback_color: Color = typed_fallback_for(
@@ -173,11 +181,34 @@ impl SeriesPointsSystem {
                 },
             };
 
-            let num_series = determine_num_series(&all_scalar_chunks);
-            let mut points_per_series =
-                allocate_plot_points(&query, &default_point, &all_scalar_chunks, num_series);
+            let num_series_vec = all_scalar_chunks_vec
+                .iter()
+                .map(|all_scalar_chunks| determine_num_series(all_scalar_chunks))
+                .collect_vec();
 
-            collect_scalars(&all_scalar_chunks, &mut points_per_series);
+            let total_num_series = num_series_vec.iter().sum();
+
+            let mut points_per_series = match all_scalar_chunks_vec.first() {
+                Some(all_scalar_chunks) => allocate_plot_points(
+                    &query,
+                    &default_point,
+                    all_scalar_chunks,
+                    total_num_series,
+                ),
+                None => return Ok(()),
+            };
+
+            let mut start_idx = 0;
+            for (all_scalar_chunks, n_series) in
+                all_scalar_chunks_vec.iter().zip(num_series_vec.iter())
+            {
+                let end_idx = start_idx + n_series;
+                collect_scalars(
+                    all_scalar_chunks,
+                    &mut points_per_series[start_idx..end_idx],
+                );
+                start_idx = end_idx;
+            }
 
             // The plot view visualizes scalar data within a specific time range, without any kind
             // of time-alignment / bootstrapping behavior:
@@ -202,7 +233,7 @@ impl SeriesPointsSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks,
+                all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesPoints::descriptor_colors(),
             );
@@ -210,7 +241,7 @@ impl SeriesPointsSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                &all_scalar_chunks,
+                all_scalar_chunks_vec.first().unwrap(),
                 &mut points_per_series,
                 &archetypes::SeriesPoints::descriptor_marker_sizes(),
                 // `marker_size` is a radius, see NOTE above
@@ -251,7 +282,7 @@ impl SeriesPointsSystem {
                         {
                             for (points, marker_shape) in points_per_series
                                 .iter_mut()
-                                .zip(clamped_or_nothing(marker_shapes.as_slice(), num_series))
+                                .zip(clamped_or_nothing(marker_shapes.as_slice(), total_num_series))
                             {
                                 for point in points {
                                     point.attrs.kind = PlotSeriesKind::Scatter(ScatterAttrs {
@@ -286,13 +317,13 @@ impl SeriesPointsSystem {
                         };
 
                         let all_frames = re_query::range_zip_1x1(
-                            all_scalars_indices(&query, &all_scalar_chunks),
+                            all_scalars_indices(&query, all_scalar_chunks_vec.first().unwrap()),
                             all_marker_shapes_indexed,
                         )
                         .enumerate();
 
                         // Simplified path for single series.
-                        if num_series == 1 {
+                        if total_num_series == 1 {
                             let points = &mut *points_per_series[0];
                             all_frames.for_each(|(i, (_index, _scalars, marker_shapes))| {
                                 if let Some(marker) = marker_shapes
@@ -307,7 +338,7 @@ impl SeriesPointsSystem {
                                 if let Some(marker_shapes) = marker_shapes {
                                     for (points, marker) in points_per_series
                                         .iter_mut()
-                                        .zip(clamped_or_nothing(&marker_shapes, num_series))
+                                        .zip(clamped_or_nothing(&marker_shapes, total_num_series))
                                     {
                                         points[i].attrs.kind =
                                             PlotSeriesKind::Scatter(ScatterAttrs {
@@ -325,27 +356,34 @@ impl SeriesPointsSystem {
                 &query,
                 &bootstrapped_results,
                 &results,
-                num_series,
+                total_num_series,
                 archetypes::SeriesPoints::descriptor_visible_series().component,
             );
-            let series_names = collect_series_name(
-                &query_ctx,
-                &bootstrapped_results,
-                &results,
-                num_series,
-                &archetypes::SeriesPoints::descriptor_names(),
-            );
+            let series_names = entity_components
+                .iter()
+                .zip(num_series_vec.iter())
+                .flat_map(|(c_id, n_series)| {
+                    if *n_series == 1usize {
+                        Either::Left(std::iter::once(get_label(entity_path, c_id)))
+                    } else {
+                        Either::Right(
+                            (1..*n_series)
+                                .map(|n| format!("{}.{}", get_label(entity_path, c_id), n)),
+                        )
+                    }
+                })
+                .collect_vec();
 
             debug_assert_eq!(points_per_series.len(), series_names.len());
             for (instance, (points, label, visible, component_identifier)) in itertools::izip!(
                 points_per_series.into_iter(),
                 series_names.into_iter(),
                 series_visibility.into_iter(),
-                std::iter::repeat(archetypes::Scalars::descriptor_scalars().component),
+                entity_components.into_iter(),
             )
             .enumerate()
             {
-                let instance_path = if num_series == 1 {
+                let instance_path = if total_num_series == 1 {
                     InstancePath::entity_all(data_result.entity_path.clone())
                 } else {
                     InstancePath::instance(data_result.entity_path.clone(), instance as u64)

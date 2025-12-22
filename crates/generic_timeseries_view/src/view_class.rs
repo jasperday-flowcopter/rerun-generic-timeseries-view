@@ -8,7 +8,7 @@ use re_viewer_context::{
     PerVisualizer, QueryRange, RecommendedView, SmallVisualizerSet, SystemExecutionOutput,
     TimeControlCommand, ViewClass, ViewClassExt as _, ViewClassRegistryError, ViewHighlights,
     ViewId, ViewQuery, ViewSpawnHeuristics, ViewState, ViewStateExt as _, ViewSystemExecutionError,
-    ViewSystemIdentifier, ViewerContext, VisualizableEntities,
+    ViewerContext, VisualizableEntities,
     external::re_entity_db::InstancePath,
 };
 use re_viewport_blueprint::ViewProperty;
@@ -429,45 +429,13 @@ impl ViewClass for TimeSeriesView {
     /// Choose the default visualizers to enable for this entity.
     fn choose_default_visualizers(
         &self,
-        entity_path: &EntityPath,
+        _entity_path: &EntityPath,
         _maybe_visualizable_entities_per_visualizer: &PerVisualizer<MaybeVisualizableEntities>,
-        visualizable_entities_per_visualizer: &PerVisualizer<VisualizableEntities>,
-        indicated_entities_per_visualizer: &PerVisualizer<IndicatedEntities>,
+        _visualizable_entities_per_visualizer: &PerVisualizer<VisualizableEntities>,
+        _indicated_entities_per_visualizer: &PerVisualizer<IndicatedEntities>,
     ) -> SmallVisualizerSet {
-        let available_visualizers: HashSet<&ViewSystemIdentifier> =
-            visualizable_entities_per_visualizer
-                .iter()
-                .filter_map(|(visualizer, ents)| {
-                    if ents.contains(entity_path) {
-                        Some(visualizer)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-        let mut visualizers: SmallVisualizerSet = available_visualizers
-            .iter()
-            .filter_map(|visualizer| {
-                if indicated_entities_per_visualizer
-                    .get(*visualizer)
-                    .is_some_and(|matching_list| matching_list.contains(entity_path))
-                {
-                    Some(**visualizer)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // If there were no other visualizers, but the SeriesLineSystem is available, use it.
-        if visualizers.is_empty()
-            && available_visualizers.contains(&SeriesLinesSystem::identifier())
-        {
-            visualizers.insert(0, SeriesLinesSystem::identifier());
-        }
-
-        visualizers
+        // All visualizers "can" visualize all entities
+        [SeriesLinesSystem::identifier(), SeriesSpanSystem::identifier()].into_iter().collect()
     }
 
     fn ui(
