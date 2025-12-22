@@ -379,7 +379,7 @@ impl SeriesPointsSystem {
                 .collect_vec();
 
             let mut series = Vec::with_capacity(total_num_series);
-            
+
             debug_assert_eq!(points_per_series.len(), series_names.len());
             for (instance, (points, label, visible, component_identifier)) in itertools::izip!(
                 points_per_series.into_iter(),
@@ -410,7 +410,6 @@ impl SeriesPointsSystem {
                 );
             }
             Ok(series)
-            
         }
     }
 }

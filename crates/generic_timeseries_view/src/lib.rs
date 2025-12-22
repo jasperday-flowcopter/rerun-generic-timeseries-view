@@ -7,17 +7,17 @@
 mod aggregation;
 mod line_visualizer_system;
 mod point_visualizer_system;
-mod span_visualizer_system;
 mod series_query;
+mod span_visualizer_system;
+mod ui;
 mod util;
 mod view_class;
-mod ui;
 
 use re_viewport_blueprint::ViewPropertyQueryError;
-use rerun::{ComponentIdentifier, EntityPath};
+use rerun::external::egui::{self, Color32};
 use rerun::external::re_sdk_types::components::{AggregationPolicy, MarkerShape};
 use rerun::external::re_viewer_context::{self, external::re_entity_db::InstancePath};
-use rerun::external::egui::{self, Color32};
+use rerun::{ComponentIdentifier, EntityPath};
 
 pub use view_class::TimeSeriesView;
 
@@ -119,8 +119,8 @@ enum LoadSeriesError {
     ViewPropertyQuery(ViewPropertyQueryError),
     EntitySpecificVisualizerError {
         entity_path: EntityPath,
-        error: String
-    }
+        error: String,
+    },
 }
 
 impl From<ViewPropertyQueryError> for LoadSeriesError {

@@ -51,8 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.add_log_receiver(rx);
 
             // Register the custom view
-            app.add_view_class::<TimeSeriesView>()
-                .unwrap();
+            app.add_view_class::<TimeSeriesView>().unwrap();
 
             Box::new(app)
         }),

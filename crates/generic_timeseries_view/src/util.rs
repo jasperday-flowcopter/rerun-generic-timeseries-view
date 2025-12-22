@@ -145,7 +145,7 @@ pub fn points_to_series(
             aggregator,
             aggregation_factor,
             min_time,
-            component_identifier
+            component_identifier,
         });
     } else {
         add_series_runs(
@@ -157,7 +157,7 @@ pub fn points_to_series(
             aggregation_factor,
             min_time,
             all_series,
-            component_identifier
+            component_identifier,
         );
     }
 }
@@ -239,7 +239,7 @@ fn add_series_runs(
     aggregation_factor: f64,
     min_time: i64,
     all_series: &mut Vec<PlotSeries>,
-    component_identifier: ComponentIdentifier
+    component_identifier: ComponentIdentifier,
 ) {
     // re_tracing::profile_function!();
 
@@ -259,7 +259,7 @@ fn add_series_runs(
         aggregator,
         aggregation_factor,
         min_time,
-        component_identifier
+        component_identifier,
     };
 
     for (i, p) in points.into_iter().enumerate() {
@@ -286,7 +286,7 @@ fn add_series_runs(
                     aggregator,
                     aggregation_factor,
                     min_time,
-                    component_identifier
+                    component_identifier,
                 },
             );
 

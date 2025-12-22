@@ -4,11 +4,11 @@ use egui_plot::{ColorConflictHandling, Legend, Line, Plot, PlotPoint, Points};
 use itertools::Itertools;
 use nohash_hasher::IntSet;
 use re_viewer_context::{
-    BlueprintContext as _, IdentifiedViewSystem as _, IndicatedEntities, VisualizableEntities,
-    PerVisualizer, QueryRange, RecommendedView, SmallVisualizerSet, SystemExecutionOutput,
-    TimeControlCommand, ViewClass, ViewClassExt as _, ViewClassRegistryError, ViewHighlights,
-    ViewId, ViewQuery, ViewSpawnHeuristics, ViewState, ViewStateExt as _, ViewSystemExecutionError,
-    ViewerContext, PerVisualizerInViewClass,
+    BlueprintContext as _, IdentifiedViewSystem as _, IndicatedEntities, PerVisualizer,
+    PerVisualizerInViewClass, QueryRange, RecommendedView, SmallVisualizerSet,
+    SystemExecutionOutput, TimeControlCommand, ViewClass, ViewClassExt as _,
+    ViewClassRegistryError, ViewHighlights, ViewId, ViewQuery, ViewSpawnHeuristics, ViewState,
+    ViewStateExt as _, ViewSystemExecutionError, ViewerContext, VisualizableEntities,
     external::re_entity_db::InstancePath,
 };
 use re_viewport_blueprint::ViewProperty;
@@ -234,9 +234,7 @@ impl ViewClass for TimeSeriesView {
                 let timeline_histograms = ctx.viewer_ctx().recording().timeline_histograms();
                 let (timeline_min, timeline_max) = timeline_histograms
                     .get(ctx.viewer_ctx().time_ctrl.timeline_name())
-                    .and_then(|stats| {
-                        Some((stats.min_opt()?, stats.max_opt()?))
-                    })
+                    .and_then(|stats| Some((stats.min_opt()?, stats.max_opt()?)))
                     .unzip();
                 ctx.view_state()
                     .as_any()
@@ -303,10 +301,9 @@ impl ViewClass for TimeSeriesView {
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
 
         list_item::list_item_scope(ui, "generic_time_series_selection_ui", |ui| {
-            
             // Mutably borrow state here
             state.component_settings =
-            selection_ui_column_visibility(viewer_ctx, ui, &state.component_settings);
+                selection_ui_column_visibility(viewer_ctx, ui, &state.component_settings);
 
             // Immutably borrow here for the rest of scope
             let ctx = self.view_context(viewer_ctx, view_id, state, space_origin);
@@ -431,7 +428,12 @@ impl ViewClass for TimeSeriesView {
         _indicated_entities_per_visualizer: &PerVisualizer<IndicatedEntities>,
     ) -> SmallVisualizerSet {
         // All visualizers "can" visualize all entities
-        [SeriesLinesSystem::identifier(), SeriesSpanSystem::identifier()].into_iter().collect()
+        [
+            SeriesLinesSystem::identifier(),
+            SeriesSpanSystem::identifier(),
+        ]
+        .into_iter()
+        .collect()
     }
 
     fn ui(
@@ -443,13 +445,10 @@ impl ViewClass for TimeSeriesView {
         system_output: SystemExecutionOutput,
     ) -> Result<(), ViewSystemExecutionError> {
         // re_tracing::profile_function!();
-        
+
         let state = state.downcast_mut::<TimeSeriesViewState>()?;
-        
-        let entities = query
-            .iter_all_entities()
-            .cloned()
-            .collect::<Vec<_>>();
+
+        let entities = query.iter_all_entities().cloned().collect::<Vec<_>>();
 
         let component_settings = {
             let view_ctx = self.view_context(ctx, query.view_id, state, query.space_origin);
@@ -479,7 +478,7 @@ impl ViewClass for TimeSeriesView {
             .chain(point_series.all_series.iter())
             .filter_map(
                 |series| {
-                    let idx = state.component_settings.binary_search_by(|settings| 
+                    let idx = state.component_settings.binary_search_by(|settings|
                         // binary search should indicate whether the argument is Less / Equal / Greater than target
                         // sorted_component_cmp indicates whether the series is Less / Equal / Greater than the argument, hence .reverse()
                         cmp_path_id((&settings.entity_path, &settings.identifier), (&series.instance_path.entity_path, &series.component_identifier))
@@ -493,17 +492,33 @@ impl ViewClass for TimeSeriesView {
                 }
             )
             .collect();
-        let offsets_scales: Vec<_> = all_plot_series_offsets_scales.iter().map(|x| (x.1, x.2)).collect();
-        let all_plot_series: Vec<_> = all_plot_series_offsets_scales.into_iter().map(|x| x.0).collect();
+        let offsets_scales: Vec<_> = all_plot_series_offsets_scales
+            .iter()
+            .map(|x| (x.1, x.2))
+            .collect();
+        let all_plot_series: Vec<_> = all_plot_series_offsets_scales
+            .into_iter()
+            .map(|x| x.0)
+            .collect();
 
-        let all_span_series: Vec<_> = span_series.all_series.iter().filter(|series| {
-            let Ok(idx) = state.component_settings.binary_search_by(|settings| {
-                cmp_path_id((&settings.entity_path, &settings.identifier), (&series.instance_path.entity_path, &series.component_identifier))
-            }) else {
-                return false
-            };
-            state.component_settings[idx].enabled
-        }).collect();
+        let all_span_series: Vec<_> = span_series
+            .all_series
+            .iter()
+            .filter(|series| {
+                let Ok(idx) = state.component_settings.binary_search_by(|settings| {
+                    cmp_path_id(
+                        (&settings.entity_path, &settings.identifier),
+                        (
+                            &series.instance_path.entity_path,
+                            &series.component_identifier,
+                        ),
+                    )
+                }) else {
+                    return false;
+                };
+                state.component_settings[idx].enabled
+            })
+            .collect();
 
         // Note that a several plot items can point to the same entity path and in some cases even to the same instance path!
         // (e.g. when plotting both lines & points with the same entity/instance path)
@@ -543,13 +558,11 @@ impl ViewClass for TimeSeriesView {
         let max_view_time = all_plot_series
             .iter()
             .filter_map(|line| line.points.last().map(|(t, _)| *t))
-            .chain(all_span_series.iter().filter_map(|series| {
-                series
-                    .points
+            .chain(
+                all_span_series
                     .iter()
-                    .last()
-                    .map(|(time, _)| *time)
-            }))
+                    .filter_map(|series| series.points.iter().last().map(|(time, _)| *time)),
+            )
             .max()
             .unwrap_or(0);
 
@@ -611,8 +624,11 @@ impl ViewClass for TimeSeriesView {
         let link_x_axis = time_axis
             .component_or_fallback::<LinkAxis>(&view_ctx, TimeAxis::descriptor_link().component)?;
 
-        let view_current_time =
-            re_sdk_types::datatypes::TimeInt(current_time.unwrap_or_default().at_least(timeline_range.min.as_i64()));
+        let view_current_time = re_sdk_types::datatypes::TimeInt(
+            current_time
+                .unwrap_or_default()
+                .at_least(timeline_range.min.as_i64()),
+        );
 
         let query_result;
         // If we globally link the x-axis it will ignore this view's time range property and use
@@ -646,27 +662,28 @@ impl ViewClass for TimeSeriesView {
                 TimeAxis::descriptor_view_range().component,
             )?;
 
-        let resolve_time_range = |view_time_range: &re_sdk_types::blueprint::components::TimeRange| {
-            make_range_sane(Range1D::new(
-                (match view_time_range.start {
-                    re_sdk_types::datatypes::TimeRangeBoundary::Infinite => {
-                        timeline_range.min.as_i64()
-                    }
-                    _ => {
-                        view_time_range
-                            .start
-                            .start_boundary_time(view_current_time)
-                            .0
-                    }
-                } - time_offset) as f64,
-                (match view_time_range.end {
-                    re_sdk_types::datatypes::TimeRangeBoundary::Infinite => {
-                        timeline_range.max.as_i64()
-                    },
-                    _ => view_time_range.end.end_boundary_time(view_current_time).0,
-                } - time_offset) as f64,
-            ))
-        };
+        let resolve_time_range =
+            |view_time_range: &re_sdk_types::blueprint::components::TimeRange| {
+                make_range_sane(Range1D::new(
+                    (match view_time_range.start {
+                        re_sdk_types::datatypes::TimeRangeBoundary::Infinite => {
+                            timeline_range.min.as_i64()
+                        }
+                        _ => {
+                            view_time_range
+                                .start
+                                .start_boundary_time(view_current_time)
+                                .0
+                        }
+                    } - time_offset) as f64,
+                    (match view_time_range.end {
+                        re_sdk_types::datatypes::TimeRangeBoundary::Infinite => {
+                            timeline_range.max.as_i64()
+                        }
+                        _ => view_time_range.end.end_boundary_time(view_current_time).0,
+                    } - time_offset) as f64,
+                ))
+            };
 
         let x_range = resolve_time_range(&view_time_range);
 
@@ -698,8 +715,6 @@ impl ViewClass for TimeSeriesView {
             .first()
             .map(|line| line.aggregator)
             .unwrap_or_default();
-
-        
 
         // TODO(#5075): Boxed-zoom should be fixed to accommodate the locked range.
         let timestamp_format = ctx.app_options().timestamp_format;
@@ -778,7 +793,9 @@ impl ViewClass for TimeSeriesView {
 
             let time_float_offset_id = plot_id.with("time_float_offset");
             // Since we store the x-axis view range with integers we want to store an extra temporary float offset for the view.
-            let plot_x_range = ui.ctx().memory(|mem| mem.data.get_temp::<Range1D>(time_float_offset_id))
+            let plot_x_range = ui
+                .ctx()
+                .memory(|mem| mem.data.get_temp::<Range1D>(time_float_offset_id))
                 .map(|offset| {
                     Range1D::new(
                         x_range.start() + offset.start(),
@@ -884,15 +901,15 @@ impl ViewClass for TimeSeriesView {
 
                 if unchanged_bounds != *transform.bounds() {
                     let new_x_range = transform_axis_range(transform, 0);
-                    let new_x_range_rounded = 
+                    let new_x_range_rounded =
                         Range1D::new(new_x_range.start().round(), new_x_range.end().round());
                     ui.ctx().memory_mut(|m| {
                         m.data.insert_temp(
                             time_float_offset_id,
                             Range1D::new(
                                 new_x_range.start() - new_x_range_rounded.start(),
-                                new_x_range.end() - new_x_range_rounded.end()
-                            )
+                                new_x_range.end() - new_x_range_rounded.end(),
+                            ),
                         )
                     });
 
@@ -1188,7 +1205,9 @@ fn add_span_to_plot(
     for series in all_plot_series {
         if series.visible {
             let n_points = series.points.len();
-            for (i, ((time_raw, label), color)) in series.points.iter().zip(series.colors.iter()).enumerate() {
+            for (i, ((time_raw, label), color)) in
+                series.points.iter().zip(series.colors.iter()).enumerate()
+            {
                 if i == n_points - 1 {
                     break;
                 }
@@ -1310,30 +1329,31 @@ fn merge_sorted_component_settings(
     let mut result = new_settings.to_owned();
 
     while let (Some(old_setting), Some(new_setting)) =
-            (prev_settings.get(old_index), new_settings.get(new_index))
-        {
-            match cmp_component_settings(
-                old_setting, new_setting
-            ) {
-                Ordering::Equal => {
-                    result[new_index] = old_setting.clone();
-                    old_index += 1;
-                    new_index += 1;
-                }
-                Ordering::Less => {
-                    old_index += 1;
-                }
-                Ordering::Greater => {
-                    new_index += 1;
-                }
+        (prev_settings.get(old_index), new_settings.get(new_index))
+    {
+        match cmp_component_settings(old_setting, new_setting) {
+            Ordering::Equal => {
+                result[new_index] = old_setting.clone();
+                old_index += 1;
+                new_index += 1;
+            }
+            Ordering::Less => {
+                old_index += 1;
+            }
+            Ordering::Greater => {
+                new_index += 1;
             }
         }
+    }
 
     *prev_settings = result;
 }
 
 /// Compare component_settings to entity_path and component_identifier
-fn cmp_path_id(left: (&EntityPath, &ComponentIdentifier), right: (&EntityPath, &ComponentIdentifier)) -> Ordering {
+fn cmp_path_id(
+    left: (&EntityPath, &ComponentIdentifier),
+    right: (&EntityPath, &ComponentIdentifier),
+) -> Ordering {
     if *left.0 == *right.0 {
         if *left.1 == *right.1 {
             return Ordering::Equal;
@@ -1350,7 +1370,10 @@ fn cmp_path_id(left: (&EntityPath, &ComponentIdentifier), right: (&EntityPath, &
 }
 
 fn cmp_component_settings(left: &ComponentSettings, right: &ComponentSettings) -> Ordering {
-    cmp_path_id((&left.entity_path, &left.identifier), (&right.entity_path, &right.identifier))
+    cmp_path_id(
+        (&left.entity_path, &left.identifier),
+        (&right.entity_path, &right.identifier),
+    )
 }
 
 // Required because we're using an incompatible version of

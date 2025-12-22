@@ -4,11 +4,15 @@ use itertools::Itertools as _;
 
 use rerun::external::re_chunk_store::RangeQuery;
 use rerun::external::re_log_types::{self, EntityPath, TimeInt};
-use rerun::external::{re_query, re_renderer};
 use rerun::external::re_sdk_types::external::arrow::datatypes::DataType as ArrowDatatype;
-use rerun::external::re_sdk_types::{ComponentDescriptor, ComponentIdentifier, Loggable as _, RowId, components};
-use rerun::external::re_view::{self, ChunksWithComponent, HybridRangeResults, RangeResultsExt as _, clamped_or_nothing};
-use rerun::external::re_viewer_context::{auto_color_egui};
+use rerun::external::re_sdk_types::{
+    ComponentDescriptor, ComponentIdentifier, Loggable as _, RowId, components,
+};
+use rerun::external::re_view::{
+    self, ChunksWithComponent, HybridRangeResults, RangeResultsExt as _, clamped_or_nothing,
+};
+use rerun::external::re_viewer_context::auto_color_egui;
+use rerun::external::{re_query, re_renderer};
 
 use crate::{PlotPoint, PlotSeriesKind};
 
