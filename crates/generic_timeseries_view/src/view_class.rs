@@ -491,19 +491,17 @@ impl ViewClass for TimeSeriesView {
             let view_ctx = self.view_context(ctx, query.view_id, state);
             entities
                 .iter()
-                .sorted()
                 .flat_map(|e| {
                     get_entity_components(&view_ctx, e, SeriesLinesSystem::component_type())
                         .into_iter()
-                        .sorted()
                         .map(|c_id| ComponentSettings::new(e.clone(), c_id))
                 })
                 .chain(entities.iter().flat_map(|e| {
                     get_entity_components(&view_ctx, e, SeriesSpanSystem::component_type())
                         .into_iter()
-                        .sorted()
                         .map(|c_id| ComponentSettings::new(e.clone(), c_id))
                 }))
+                .sorted_by(&cmp_component_settings)
                 .collect::<Vec<_>>()
         };
 
@@ -520,8 +518,8 @@ impl ViewClass for TimeSeriesView {
                     let idx = state.component_settings.binary_search_by(|settings| 
                         // binary search should indicate whether the argument is Less / Equal / Greater than target
                         // sorted_component_cmp indicates whether the series is Less / Equal / Greater than the argument, hence .reverse()
-                        sorted_component_cmp(settings, &series.instance_path.entity_path, &series.component_identifier).reverse()
-                    ).unwrap();
+                        cmp_path_id((&settings.entity_path, &settings.identifier), (&series.instance_path.entity_path, &series.component_identifier))
+                    ).ok()?;
                     let settings = &state.component_settings[idx];
                     if settings.enabled {
                         Some((series, settings.offset, settings.scale))
@@ -535,9 +533,11 @@ impl ViewClass for TimeSeriesView {
         let all_plot_series: Vec<_> = all_plot_series_offsets_scales.into_iter().map(|x| x.0).collect();
 
         let all_span_series: Vec<_> = span_series.all_series.iter().filter(|series| {
-            let idx = state.component_settings.binary_search_by(|settings| {
-                sorted_component_cmp(settings, &series.instance_path.entity_path, &series.component_identifier).reverse()
-            }).unwrap();
+            let Ok(idx) = state.component_settings.binary_search_by(|settings| {
+                cmp_path_id((&settings.entity_path, &settings.identifier), (&series.instance_path.entity_path, &series.component_identifier))
+            }) else {
+                return false
+            };
             state.component_settings[idx].enabled
         }).collect();
 
@@ -1339,8 +1339,8 @@ fn merge_sorted_component_settings(
     while let (Some(old_setting), Some(new_setting)) =
             (prev_settings.get(old_index), new_settings.get(new_index))
         {
-            match sorted_component_cmp(
-                old_setting, &new_setting.entity_path, &new_setting.identifier
+            match cmp_component_settings(
+                old_setting, new_setting
             ) {
                 Ordering::Equal => {
                     result[new_index] = old_setting.clone();
@@ -1348,10 +1348,10 @@ fn merge_sorted_component_settings(
                     new_index += 1;
                 }
                 Ordering::Less => {
-                    new_index += 1;
+                    old_index += 1;
                 }
                 Ordering::Greater => {
-                    old_index += 1;
+                    new_index += 1;
                 }
             }
         }
@@ -1360,20 +1360,24 @@ fn merge_sorted_component_settings(
 }
 
 /// Compare component_settings to entity_path and component_identifier
-fn sorted_component_cmp(component_settings: &ComponentSettings, entity_path: &EntityPath, component_identifier: &ComponentIdentifier) -> Ordering {
-    if component_settings.entity_path == *entity_path {
-        if component_settings.identifier == *component_identifier {
+fn cmp_path_id(left: (&EntityPath, &ComponentIdentifier), right: (&EntityPath, &ComponentIdentifier)) -> Ordering {
+    if *left.0 == *right.0 {
+        if *left.1 == *right.1 {
             return Ordering::Equal;
         }
-        if component_settings.identifier < *component_identifier {
+        if *left.1 > *right.1 {
             return Ordering::Greater;
         }
         return Ordering::Less;
     }
-    if component_settings.entity_path < *entity_path {
+    if *left.0 > *right.0 {
         return Ordering::Greater;
     }
     Ordering::Less
+}
+
+fn cmp_component_settings(left: &ComponentSettings, right: &ComponentSettings) -> Ordering {
+    cmp_path_id((&left.entity_path, &left.identifier), (&right.entity_path, &right.identifier))
 }
 
 // Required because we're using an incompatible version of
