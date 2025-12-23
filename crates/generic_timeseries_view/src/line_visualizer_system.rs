@@ -332,7 +332,7 @@ impl SeriesLinesSystem {
                         Either::Left(std::iter::once(get_label(entity_path, c_id)))
                     } else {
                         Either::Right(
-                            (1..*n_series)
+                            (1..=*n_series)
                                 .map(|n| format!("{}.{}", get_label(entity_path, c_id), n)),
                         )
                     }
