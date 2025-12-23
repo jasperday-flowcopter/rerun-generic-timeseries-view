@@ -371,12 +371,17 @@ impl SeriesPointsSystem {
                         Either::Left(std::iter::once(get_label(entity_path, c_id)))
                     } else {
                         Either::Right(
-                            (1..=*n_series)
+                            (0..*n_series)
                                 .map(|n| format!("{}.{}", get_label(entity_path, c_id), n)),
                         )
                     }
                 })
                 .collect_vec();
+
+            let series_components = entity_components
+                .into_iter()
+                .zip(num_series_vec.iter())
+                .flat_map(|(component, count)| std::iter::repeat(component).take(*count));
 
             let mut series = Vec::with_capacity(total_num_series);
 
@@ -385,7 +390,7 @@ impl SeriesPointsSystem {
                 points_per_series.into_iter(),
                 series_names.into_iter(),
                 series_visibility.into_iter(),
-                entity_components.into_iter(),
+                series_components,
             )
             .enumerate()
             {
